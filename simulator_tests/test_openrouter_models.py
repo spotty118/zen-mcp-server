@@ -117,7 +117,7 @@ class OpenRouterModelsTest(BaseSimulatorTest):
             self.logger.info("  ✅ Direct OpenRouter model call completed")
 
             # Test 5: OpenRouter alias from config
-            self.logger.info("  5: Testing OpenRouter alias from config ('opus' -> anthropic/claude-opus-4)")
+            self.logger.info("  5: Testing OpenRouter alias from config ('opus' -> anthropic/claude-opus-4.1)")
 
             response5, _ = self.call_mcp_tool(
                 "chat",
