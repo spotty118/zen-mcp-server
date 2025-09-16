@@ -247,7 +247,7 @@ class AgentAPIClient:
                     return provider_type, model_name
                 elif available_models:
                     # Use first available model from this provider
-                    provider_models = [m for m in available_models if provider.supports_model(m)]
+                    provider_models = [m for m in available_models if provider.validate_model_name(m)]
                     if provider_models:
                         return provider_type, provider_models[0]
         
@@ -256,7 +256,7 @@ class AgentAPIClient:
             provider = self.provider_registry.get_provider(pref_provider)
             if provider:
                 available_models = self.provider_registry.get_available_model_names()
-                provider_models = [m for m in available_models if provider.supports_model(m)]
+                provider_models = [m for m in available_models if provider.validate_model_name(m)]
                 
                 if model_name and model_name in provider_models:
                     return pref_provider, model_name
