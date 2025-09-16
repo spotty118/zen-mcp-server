@@ -1,7 +1,7 @@
 """
-Configuration and constants for Zen MCP Server
+Configuration and constants for Nexus MCP Server
 
-This module centralizes all configuration settings for the Zen MCP Server.
+This module centralizes all configuration settings for the Nexus MCP Server.
 It defines model configurations, token limits, temperature defaults, and other
 constants used throughout the application.
 

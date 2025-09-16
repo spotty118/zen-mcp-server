@@ -34,6 +34,8 @@ from tools.shared.base_models import ToolRequest
 from tools.shared.base_tool import BaseTool
 from utils.core_context_storage import get_core_context_storage
 from utils.file_utils import read_files
+from utils.agent_core import AgentRole, AgentStatus
+from utils.agent_communication import get_agent_communication_system
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +58,7 @@ class ParallelThinkingPath:
         self.memory_usage = 0.0  # Track memory usage for optimization
         self.core_context_used = False  # Track if core-specific context was utilized
         self.shared_context_keys = []  # Keys that were shared with other cores
+        self.assigned_agent = None  # ID of the agent assigned to this path
 
 
 class ParallelThinkRequest(ToolRequest):
@@ -117,6 +120,17 @@ class ParallelThinkRequest(ToolRequest):
     context_sharing_threshold: float = Field(
         default=0.7, description="Confidence threshold for sharing insights between cores (0.0-1.0)"
     )
+    
+    # Agent-based execution options
+    enable_agent_mode: bool = Field(
+        default=True, description="Enable agent-based execution where each core acts as an autonomous agent"
+    )
+    agent_roles: Optional[list[str]] = Field(
+        default=None, description="Specific agent roles to use (security_analyst, performance_optimizer, etc.)"
+    )
+    enable_agent_communication: bool = Field(
+        default=True, description="Enable communication between agents during parallel thinking"
+    )
     # Synthesis options
     synthesis_style: str = Field(
         default="comprehensive",
@@ -137,11 +151,13 @@ class ParallelThinkTool(BaseTool):
 
     name = "parallelthink"
     description = (
-        "PARALLEL MULTI-PATH REASONING - Execute multiple thinking processes concurrently to explore "
-        "different approaches, test hypotheses, or gather diverse perspectives. Perfect for: complex "
-        "problem-solving, architectural decisions, exploring trade-offs, consensus building, or when "
-        "you want multiple angles on a challenging question. Synthesizes insights from parallel paths "
-        "into comprehensive analysis. Choose 2-6 thinking paths based on problem complexity."
+        "PARALLEL MULTI-AGENT REASONING - Execute multiple thinking processes using specialized AI agents "
+        "that communicate and collaborate. Each CPU core acts as an autonomous agent with specific roles "
+        "(Security Analyst, Performance Optimizer, Architecture Reviewer, etc.) that maintain individual "
+        "thoughts and context while sharing insights. Perfect for: complex problem-solving, architectural "
+        "decisions, multi-domain analysis, agent consensus building, or when you want specialized agents "
+        "working together on challenging questions. Agents form teams, communicate insights, and synthesize "
+        "collaborative analysis. Choose 2-6 agents based on problem complexity and required expertise areas."
     )
 
     def get_name(self) -> str:
@@ -399,6 +415,33 @@ class ParallelThinkTool(BaseTool):
             logger.warning(f"Could not retrieve shared insights for core {core_id}: {e}")
             return {}
 
+    def _retrieve_agent_insights(self, agent_system, requesting_agent) -> dict:
+        """Retrieve insights from other agents in the same team"""
+        try:
+            insights = {}
+            
+            # Get insights from agents in the same teams
+            for team_id in requesting_agent.team_memberships:
+                if team_id in agent_system.teams:
+                    team = agent_system.teams[team_id]
+                    for member_id in team.members:
+                        if member_id != requesting_agent.agent_id and member_id in agent_system.agents:
+                            member_agent = agent_system.agents[member_id]
+                            
+                            # Get recent insights from this agent
+                            recent_thoughts = member_agent.get_recent_thoughts(limit=5)
+                            insight_thoughts = [t for t in recent_thoughts if t.thought_type == "insight"]
+                            
+                            if insight_thoughts:
+                                latest_insight = insight_thoughts[-1]  # Most recent insight
+                                insights[member_id] = latest_insight.content
+                                
+            return insights
+            
+        except Exception as e:
+            logger.warning(f"Could not retrieve agent insights: {e}")
+            return {}
+
     def _detect_gpu_availability(self) -> dict:
         """Detect light GPU support availability (keeping it optional to avoid overkill)"""
         gpu_info = {
@@ -486,6 +529,52 @@ class ParallelThinkTool(BaseTool):
         ]
         return hypothesis_frames[:count]
 
+    def _determine_agent_roles(self, requested_roles: Optional[list[str]], path_count: int) -> list[AgentRole]:
+        """Determine appropriate agent roles for each thinking path"""
+        if requested_roles:
+            # Use explicitly requested roles
+            role_mapping = {
+                "security_analyst": AgentRole.SECURITY_ANALYST,
+                "performance_optimizer": AgentRole.PERFORMANCE_OPTIMIZER,
+                "architecture_reviewer": AgentRole.ARCHITECTURE_REVIEWER,
+                "code_quality_inspector": AgentRole.CODE_QUALITY_INSPECTOR,
+                "debug_specialist": AgentRole.DEBUG_SPECIALIST,
+                "planning_coordinator": AgentRole.PLANNING_COORDINATOR,
+                "consensus_facilitator": AgentRole.CONSENSUS_FACILITATOR,
+                "generalist": AgentRole.GENERALIST
+            }
+            
+            roles = []
+            for role_str in requested_roles[:path_count]:
+                role = role_mapping.get(role_str.lower(), AgentRole.GENERALIST)
+                roles.append(role)
+            
+            # Fill remaining slots with generalists if needed
+            while len(roles) < path_count:
+                roles.append(AgentRole.GENERALIST)
+                
+            return roles
+        else:
+            # Auto-assign roles based on path count and general purpose
+            default_roles = [
+                AgentRole.ARCHITECTURE_REVIEWER,    # Strategic overview
+                AgentRole.SECURITY_ANALYST,         # Risk assessment  
+                AgentRole.PERFORMANCE_OPTIMIZER,    # Efficiency focus
+                AgentRole.CODE_QUALITY_INSPECTOR,   # Quality focus
+                AgentRole.DEBUG_SPECIALIST,         # Problem-solving
+                AgentRole.PLANNING_COORDINATOR,     # Organization
+                AgentRole.CONSENSUS_FACILITATOR,    # Integration
+                AgentRole.GENERALIST               # Broad perspective
+            ]
+            
+            # Cycle through default roles based on path count
+            roles = []
+            for i in range(path_count):
+                role = default_roles[i % len(default_roles)]
+                roles.append(role)
+                
+            return roles
+
     def _get_available_models(self) -> list[str]:
         """Get list of available models from different providers"""
         registry = ModelProviderRegistry()
@@ -513,14 +602,26 @@ class ParallelThinkTool(BaseTool):
 
     async def _execute_thinking_path(
         self, path: ParallelThinkingPath, prompt: str, system_prompt: str, files_content: str,
-        enable_core_context: bool = True, share_insights: bool = True
+        enable_core_context: bool = True, share_insights: bool = True, agent_system=None
     ) -> ParallelThinkingPath:
-        """Execute a single thinking path asynchronously with core context support"""
+        """Execute a single thinking path asynchronously with core context and agent communication support"""
         start_time = time.time()
         start_memory = self._get_memory_usage()
 
         # Record thread information for debugging
         path.thread_id = threading.get_ident()
+
+        # Get agent if assigned
+        agent = None
+        if agent_system and path.assigned_agent:
+            agent = agent_system.agents.get(path.assigned_agent)
+            if agent:
+                agent.update_status(AgentStatus.THINKING)
+                agent.add_thought(
+                    thought_type="analysis",
+                    content=f"Starting analysis with approach: {path.approach}",
+                    confidence=0.8
+                )
 
         try:
             # Get shared insights from other cores if enabled
@@ -528,11 +629,24 @@ class ParallelThinkTool(BaseTool):
             if enable_core_context and share_insights and path.cpu_core is not None:
                 shared_insights = self._retrieve_shared_insights(path.cpu_core, path.approach)
 
+            # Also get agent insights if agent mode is enabled
+            agent_insights = {}
+            if agent_system and agent:
+                agent_insights = self._retrieve_agent_insights(agent_system, agent)
+
             # Prepare the full prompt for this path
             if path.prompt_variation:
                 full_prompt = path.prompt_variation
             else:
                 approach_instruction = f"\n\nTHINKING APPROACH: {path.approach}\n"
+                
+                # Add agent personality and role context if available
+                if agent:
+                    role_context = f"AGENT ROLE: {agent.role.value.replace('_', ' ').title()}\n"
+                    personality_context = f"COMMUNICATION STYLE: {agent.personality.communication_style}\n"
+                    decision_style = f"DECISION MAKING: {agent.personality.decision_making_style}\n"
+                    approach_instruction = f"\n\n{role_context}{personality_context}{decision_style}\n{approach_instruction}"
+                
                 full_prompt = approach_instruction + prompt
 
             # Add shared insights to prompt if available
@@ -541,6 +655,13 @@ class ParallelThinkTool(BaseTool):
                 for approach, insights in shared_insights.items():
                     insights_text += f"- {approach.title()}: {insights}\n"
                 full_prompt += insights_text
+
+            # Add agent insights if available
+            if agent_insights:
+                agent_insights_text = "\n\nINSIGHTS FROM OTHER AGENTS:\n"
+                for agent_id, insight in agent_insights.items():
+                    agent_insights_text += f"- Agent {agent_id}: {insight}\n"
+                full_prompt += agent_insights_text
 
             if files_content:
                 full_prompt = f"{full_prompt}\n\nFILE CONTEXT:\n{files_content}"
@@ -573,6 +694,15 @@ class ParallelThinkTool(BaseTool):
             path.execution_time = time.time() - start_time
             path.memory_usage = max(0, self._get_memory_usage() - start_memory)
 
+            # Agent completes thinking and shares insights
+            if agent:
+                agent.update_status(AgentStatus.COMMUNICATING)
+                agent.add_thought(
+                    thought_type="insight",
+                    content=f"Completed analysis in {path.execution_time:.2f}s. Key findings ready to share.",
+                    confidence=0.9
+                )
+
             # Store context and insights if enabled
             if enable_core_context and path.cpu_core is not None:
                 # Extract key insights from the result for sharing
@@ -581,10 +711,12 @@ class ParallelThinkTool(BaseTool):
                     "execution_time": path.execution_time,
                     "memory_usage": path.memory_usage,
                     "model_used": model_name,
-                    "shared_insights_used": bool(shared_insights)
+                    "shared_insights_used": bool(shared_insights),
+                    "agent_insights_used": bool(agent_insights),
+                    "assigned_agent": path.assigned_agent
                 }
 
-                # Simple insight extraction (could be enhanced with NLP)
+                # Enhanced insight extraction
                 result_text = response.content.lower()
                 insights = []
 
@@ -596,6 +728,8 @@ class ParallelThinkTool(BaseTool):
                     insights.append("scalability_factors")
                 if "complexity" in result_text or "complex" in result_text:
                     insights.append("complexity_analysis")
+                if "architecture" in result_text or "design" in result_text:
+                    insights.append("architectural_considerations")
 
                 if insights:
                     context_data["insights"] = insights
@@ -604,17 +738,40 @@ class ParallelThinkTool(BaseTool):
                 should_share = share_insights and len(insights) > 0
                 self._store_core_context(path, path.cpu_core, context_data, should_share)
 
+                # Share insights through agent communication if enabled
+                if agent_system and agent and insights:
+                    insight_message = f"Discovered {len(insights)} key insights: {', '.join(insights)}"
+                    agent_system.send_message(
+                        from_agent=agent.agent_id,
+                        to_agent="ALL",
+                        message_type="insight",
+                        content=insight_message,
+                        priority=7
+                    )
+
         except Exception as e:
             path.error = str(e)
             path.execution_time = time.time() - start_time
             path.memory_usage = max(0, self._get_memory_usage() - start_memory)
             logger.error(f"Error in thinking path {path.path_id}: {e}")
+            
+            if agent:
+                agent.update_status(AgentStatus.ACTIVE)
+                agent.add_thought(
+                    thought_type="concern",
+                    content=f"Encountered error during analysis: {str(e)}",
+                    confidence=0.9
+                )
+
+        # Agent returns to active status
+        if agent:
+            agent.update_status(AgentStatus.ACTIVE)
 
         return path
 
     def _execute_thinking_path_sync(
         self, path: ParallelThinkingPath, prompt: str, system_prompt: str, files_content: str,
-        core_id: Optional[int] = None, enable_core_context: bool = True, share_insights: bool = True
+        core_id: Optional[int] = None, enable_core_context: bool = True, share_insights: bool = True, agent_system=None
     ) -> ParallelThinkingPath:
         """Execute a single thinking path synchronously (for thread pool execution)"""
         if core_id is not None:
@@ -633,7 +790,7 @@ class ParallelThinkTool(BaseTool):
             # We're in an async context, need to create a new event loop for this thread
             async def run_in_thread():
                 return await self._execute_thinking_path(
-                    path, prompt, system_prompt, files_content, enable_core_context, share_insights
+                    path, prompt, system_prompt, files_content, enable_core_context, share_insights, agent_system
                 )
 
             # Create a new event loop for this thread
@@ -647,15 +804,15 @@ class ParallelThinkTool(BaseTool):
         else:
             # Not in an async context, can use asyncio.run
             return asyncio.run(self._execute_thinking_path(
-                path, prompt, system_prompt, files_content, enable_core_context, share_insights
+                path, prompt, system_prompt, files_content, enable_core_context, share_insights, agent_system
             ))
 
     async def _execute_paths_hybrid(
         self, paths: list[ParallelThinkingPath], prompt: str, system_prompt: str, files_content: str,
         cores: int, batch_size: int, enable_cpu_affinity: bool, enable_core_context: bool = True,
-        share_insights: bool = True
+        share_insights: bool = True, agent_system=None
     ) -> list[ParallelThinkingPath]:
-        """Execute thinking paths using hybrid concurrency strategy with core context support"""
+        """Execute thinking paths using hybrid concurrency strategy with core context and agent support"""
         logger.info(f"Executing {len(paths)} thinking paths using {cores} cores with batch size {batch_size}")
 
         # Create thread pool for CPU-bound operations
@@ -668,7 +825,7 @@ class ParallelThinkTool(BaseTool):
                 core_id = i % cores if enable_cpu_affinity else None
                 future = executor.submit(
                     self._execute_thinking_path_sync,
-                    path, prompt, system_prompt, files_content, core_id, enable_core_context, share_insights
+                    path, prompt, system_prompt, files_content, core_id, enable_core_context, share_insights, agent_system
                 )
                 future_to_path[future] = path
 
@@ -689,11 +846,11 @@ class ParallelThinkTool(BaseTool):
 
     async def _execute_paths_asyncio(
         self, paths: list[ParallelThinkingPath], prompt: str, system_prompt: str, files_content: str,
-        enable_core_context: bool = True, share_insights: bool = True
+        enable_core_context: bool = True, share_insights: bool = True, agent_system=None
     ) -> list[ParallelThinkingPath]:
         """Execute thinking paths using pure asyncio (original approach)"""
         tasks = [
-            self._execute_thinking_path(path, prompt, system_prompt, files_content, enable_core_context, share_insights)
+            self._execute_thinking_path(path, prompt, system_prompt, files_content, enable_core_context, share_insights, agent_system)
             for path in paths
         ]
         return await asyncio.gather(*tasks, return_exceptions=True)
@@ -900,6 +1057,48 @@ class ParallelThinkTool(BaseTool):
                 except Exception as e:
                     logger.warning(f"Could not initialize core context storage: {e}")
 
+            # Initialize agent communication system if agent mode is enabled
+            agent_system = None
+            agents = []
+            team_id = None
+            if request.enable_agent_mode:
+                try:
+                    agent_system = get_agent_communication_system()
+                    
+                    # Determine agent roles for each path
+                    agent_roles = self._determine_agent_roles(request.agent_roles, len(paths))
+                    
+                    # Create agents for each core/path
+                    for i, (path, role) in enumerate(zip(paths, agent_roles)):
+                        core_id = i % optimal_cores
+                        agent = agent_system.register_agent(core_id=core_id, role=role)
+                        agents.append(agent)
+                        path.assigned_agent = agent.agent_id
+                        
+                        # Add initial thought about the task
+                        agent.add_thought(
+                            thought_type="analysis",
+                            content=f"Assigned to approach: {path.approach}. Beginning parallel thinking analysis.",
+                            confidence=0.8
+                        )
+                    
+                    # Create a team for this parallel thinking session
+                    if len(agents) > 1:
+                        team_id = agent_system.create_team(
+                            team_name=f"ParallelThink_{int(time.time())}",
+                            purpose=f"Collaborative analysis: {request.prompt[:100]}..."
+                        )
+                        
+                        # Add all agents to the team
+                        for agent in agents:
+                            agent_system.add_agent_to_team(agent.agent_id, team_id)
+                            
+                        logger.info(f"Created agent team {team_id} with {len(agents)} agents")
+                    
+                except Exception as e:
+                    logger.warning(f"Could not initialize agent communication system: {e}")
+                    request.enable_agent_mode = False  # Fall back to non-agent mode
+
             # Execute all thinking paths concurrently
             system_prompt = self.get_system_prompt()
             start_time = time.time()
@@ -910,21 +1109,21 @@ class ParallelThinkTool(BaseTool):
                     completed_paths = await self._execute_paths_hybrid(
                         paths, request.prompt, system_prompt, files_content,
                         optimal_cores, batch_size, request.enable_cpu_affinity,
-                        request.enable_core_context, request.share_insights_between_cores
+                        request.enable_core_context, request.share_insights_between_cores, agent_system
                     )
                 elif execution_strategy == "hybrid":
                     # Use hybrid approach
                     completed_paths = await self._execute_paths_hybrid(
                         paths, request.prompt, system_prompt, files_content,
                         optimal_cores, batch_size, request.enable_cpu_affinity,
-                        request.enable_core_context, request.share_insights_between_cores
+                        request.enable_core_context, request.share_insights_between_cores, agent_system
                     )
                 else:  # asyncio
                     # Use pure asyncio (original approach)
                     completed_paths = await asyncio.wait_for(
                         self._execute_paths_asyncio(
                             paths, request.prompt, system_prompt, files_content,
-                            request.enable_core_context, request.share_insights_between_cores
+                            request.enable_core_context, request.share_insights_between_cores, agent_system
                         ),
                         timeout=request.time_limit or 60
                     )
