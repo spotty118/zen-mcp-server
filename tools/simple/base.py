@@ -313,15 +313,25 @@ class SimpleTool(BaseTool):
 
                 model_name = DEFAULT_MODEL
 
-            # Store the current model name for later use
+            # Parse provider prefix to get actual model name for API calls
+            from providers.base import parse_provider_prefix
+            
+            explicit_provider_type, actual_model_name = parse_provider_prefix(model_name)
+            
+            # Store the original model name for context (may include prefix)
             self._current_model_name = model_name
+            # Store the actual model name for API calls (prefix stripped)
+            self._actual_model_name = actual_model_name
+            
+            if explicit_provider_type:
+                logger.info(f"Explicit provider '{explicit_provider_type.value}' requested for model '{actual_model_name}'")
 
             # Handle model context from arguments (for in-process testing)
             if "_model_context" in arguments:
                 self._model_context = arguments["_model_context"]
                 logger.debug(f"{self.get_name()}: Using model context from arguments")
             else:
-                # Create model context if not provided
+                # Create model context if not provided - use original model name for proper provider routing
                 from utils.model_context import ModelContext
 
                 self._model_context = ModelContext(model_name)
@@ -431,10 +441,10 @@ class SimpleTool(BaseTool):
             # Generate content with provider abstraction
             model_response = provider.generate_content(
                 prompt=prompt,
-                model_name=self._current_model_name,
+                model_name=self._actual_model_name,  # Use actual model name (prefix stripped)
                 system_prompt=system_prompt,
                 temperature=temperature,
-                thinking_mode=thinking_mode if provider.supports_thinking_mode(self._current_model_name) else None,
+                thinking_mode=thinking_mode if provider.supports_thinking_mode(self._actual_model_name) else None,
                 images=images if images else None,
             )
 
@@ -488,11 +498,11 @@ class SimpleTool(BaseTool):
                         try:
                             retry_response = provider.generate_content(
                                 prompt=retry_prompt,
-                                model_name=self._current_model_name,
+                                model_name=self._actual_model_name,  # Use actual model name (prefix stripped)
                                 system_prompt=system_prompt,
                                 temperature=temperature,
                                 thinking_mode=(
-                                    thinking_mode if provider.supports_thinking_mode(self._current_model_name) else None
+                                    thinking_mode if provider.supports_thinking_mode(self._actual_model_name) else None
                                 ),
                                 images=images if images else None,
                             )

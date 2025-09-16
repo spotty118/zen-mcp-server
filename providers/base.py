@@ -28,6 +28,53 @@ class ProviderType(Enum):
     DIAL = "dial"
 
 
+# Provider prefix constants for explicit provider selection
+# Users can specify "openrouter:model-name" to force OpenRouter usage
+PROVIDER_PREFIXES = {
+    "google": ProviderType.GOOGLE,
+    "gemini": ProviderType.GOOGLE,  # Alternative prefix for Gemini
+    "openai": ProviderType.OPENAI,
+    "xai": ProviderType.XAI,
+    "grok": ProviderType.XAI,  # Alternative prefix for X.AI
+    "openrouter": ProviderType.OPENROUTER,
+    "custom": ProviderType.CUSTOM,
+    "local": ProviderType.CUSTOM,  # Alternative prefix for custom/local models
+    "dial": ProviderType.DIAL,
+}
+
+
+def parse_provider_prefix(model_name: str) -> tuple[Optional[ProviderType], str]:
+    """
+    Parse provider prefix from model name.
+    
+    Supports formats like:
+    - "openrouter:pro" -> (ProviderType.OPENROUTER, "pro")
+    - "google:flash" -> (ProviderType.GOOGLE, "flash")
+    - "custom:llama3.2" -> (ProviderType.CUSTOM, "llama3.2")
+    - "flash" -> (None, "flash")
+    
+    Args:
+        model_name: Model name potentially with provider prefix
+        
+    Returns:
+        Tuple of (provider_type, actual_model_name)
+        provider_type is None if no prefix found
+    """
+    if ":" not in model_name:
+        return None, model_name
+        
+    prefix, actual_model = model_name.split(":", 1)
+    provider_type = PROVIDER_PREFIXES.get(prefix.lower())
+    
+    if provider_type:
+        logging.debug(f"Parsed provider prefix '{prefix}' -> {provider_type.value}, model: '{actual_model}'")
+        return provider_type, actual_model
+    else:
+        # Invalid prefix, treat as regular model name
+        logging.debug(f"Unknown provider prefix '{prefix}', treating '{model_name}' as regular model name")
+        return None, model_name
+
+
 class TemperatureConstraint(ABC):
     """Abstract base class for temperature constraints."""
 

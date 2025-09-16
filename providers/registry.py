@@ -108,38 +108,68 @@ class ModelProviderRegistry:
     def get_provider_for_model(cls, model_name: str) -> Optional[ModelProvider]:
         """Get provider instance for a specific model name.
 
-        Provider priority order:
+        Supports provider-specific routing with prefixes like:
+        - "openrouter:pro" - Forces OpenRouter provider for "pro" model
+        - "google:flash" - Forces Google provider for "flash" model  
+        - "custom:llama3.2" - Forces Custom provider for "llama3.2" model
+
+        Default priority order (no prefix):
         1. Native APIs (GOOGLE, OPENAI) - Most direct and efficient
         2. CUSTOM - For local/private models with specific endpoints
         3. OPENROUTER - Catch-all for cloud models via unified API
 
         Args:
-            model_name: Name of the model (e.g., "gemini-2.5-flash", "gpt5")
+            model_name: Name of the model (e.g., "gemini-2.5-flash", "openrouter:pro")
 
         Returns:
             ModelProvider instance that supports this model
         """
         logging.debug(f"get_provider_for_model called with model_name='{model_name}'")
 
-        # Check providers in priority order
+        # Parse provider prefix if present
+        from .base import parse_provider_prefix
+        
+        explicit_provider_type, actual_model_name = parse_provider_prefix(model_name)
+        
         instance = cls()
         logging.debug(f"Registry instance: {instance}")
         logging.debug(f"Available providers in registry: {list(instance._providers.keys())}")
 
+        # If explicit provider is specified, try only that provider
+        if explicit_provider_type:
+            logging.info(f"Explicit provider requested: {explicit_provider_type.value} for model '{actual_model_name}'")
+            
+            if explicit_provider_type in instance._providers:
+                provider = cls.get_provider(explicit_provider_type)
+                if provider and provider.validate_model_name(actual_model_name):
+                    logging.info(f"Successfully routed '{model_name}' to {explicit_provider_type.value} provider")
+                    return provider
+                else:
+                    logging.warning(
+                        f"Explicitly requested provider {explicit_provider_type.value} does not support model '{actual_model_name}'"
+                    )
+                    return None
+            else:
+                logging.warning(f"Explicitly requested provider {explicit_provider_type.value} is not registered")
+                return None
+
+        # No explicit provider, use normal priority order
+        logging.debug(f"No explicit provider, using priority order for model '{actual_model_name}'")
+        
         for provider_type in cls.PROVIDER_PRIORITY_ORDER:
             if provider_type in instance._providers:
                 logging.debug(f"Found {provider_type} in registry")
                 # Get or create provider instance
                 provider = cls.get_provider(provider_type)
-                if provider and provider.validate_model_name(model_name):
-                    logging.debug(f"{provider_type} validates model {model_name}")
+                if provider and provider.validate_model_name(actual_model_name):
+                    logging.debug(f"{provider_type} validates model {actual_model_name}")
                     return provider
                 else:
-                    logging.debug(f"{provider_type} does not validate model {model_name}")
+                    logging.debug(f"{provider_type} does not validate model {actual_model_name}")
             else:
                 logging.debug(f"{provider_type} not found in registry")
 
-        logging.debug(f"No provider found for model {model_name}")
+        logging.debug(f"No provider found for model {actual_model_name}")
         return None
 
     @classmethod
