@@ -251,6 +251,12 @@ DISABLED_TOOLS=
 - **[Thinking modes](docs/advanced-usage.md#thinking-modes)** - Control reasoning depth vs cost
 - **Vision support** - Analyze images, diagrams, screenshots
 
+**Advanced Parallel Processing**
+- **[Intelligent CPU utilization](docs/enhanced-parallel-thinking.md)** - Optimized multi-core processing with context sharing
+- **Per-core context isolation** - Each CPU core maintains its own context while sharing insights
+- **Cross-platform optimization** - Intel, AMD, Apple Silicon architecture awareness
+- **Smart execution strategies** - Adaptive selection between async, threaded, and hybrid approaches
+
 **Developer Experience**
 - **Guided workflows** - Systematic investigation prevents rushed analysis
 - **Smart file handling** - Auto-expand directories, manage token limits
@@ -279,6 +285,75 @@ DISABLED_TOOLS=
 
 👉 **[Advanced Usage Guide](docs/advanced-usage.md)** for complex workflows, model configuration, and power-user features
 
+## CPU Utilization & Architecture
+
+### Intelligent Multi-Core Processing
+
+Zen MCP uses a **shared-instance architecture with per-core context isolation** - the optimal balance between performance and context awareness:
+
+**Why Shared Instance vs. Separate Core Instances?**
+
+✅ **Shared Instance (Current Approach)**
+- **Full context awareness** - Cores share insights and discoveries
+- **Memory efficient** - Single process, shared resources
+- **Better coordination** - Unified synthesis of results
+- **Cross-core learning** - Successful strategies shared between cores
+
+❌ **Separate Instances Per Core**
+- **Context isolation** - Each core works in complete isolation
+- **Memory overhead** - Multiple processes, duplicated resources  
+- **No collaboration** - Cores cannot learn from each other
+- **Complex coordination** - Difficult to synthesize results
+
+### Smart CPU Optimization
+
+**Architecture-Aware Processing:**
+- **Apple Silicon (M1/M2/M3+)**: Leverages Performance/Efficiency core design
+- **AMD Ryzen X3D**: Optimizes for 3D V-Cache capabilities
+- **Intel 12th gen+**: Balances Performance and Efficiency cores
+- **Cross-platform**: Graceful fallback on all systems
+
+**Execution Strategies:**
+- **`adaptive`** (default): System chooses optimal strategy automatically
+- **`threads`**: CPU-intensive parallel processing
+- **`asyncio`**: I/O-bound operations
+- **`hybrid`**: Intelligent combination of both
+
+**Context Sharing Benefits:**
+```
+Core 0: Analyzing security → shares "SQL injection found" 
+Core 1: Analyzing performance → uses security insight to check query optimization
+Core 2: Analyzing architecture → incorporates both security and performance findings
+Result: Comprehensive analysis with cross-domain insights
+```
+
+### When CPU Optimization Matters
+
+**Benefit High:** Complex reasoning, code analysis, multi-model workflows
+**Benefit Medium:** Planning, consensus building, debugging  
+**Benefit Low:** Simple queries, single-path thinking
+
+**Configuration:**
+```json
+// High-performance setup
+{
+  "thinking_paths": 6,
+  "execution_strategy": "adaptive", 
+  "enable_cpu_affinity": true,
+  "share_insights_between_cores": true
+}
+
+// Memory-optimized setup
+{
+  "thinking_paths": 3,
+  "execution_strategy": "hybrid",
+  "enable_cpu_affinity": false,
+  "batch_size": 1
+}
+```
+
+👉 **[Enhanced Parallel Thinking Guide](docs/enhanced-parallel-thinking.md)** for detailed CPU optimization and configuration
+
 ## Quick Links
 
 **📖 Documentation**
@@ -286,6 +361,7 @@ DISABLED_TOOLS=
 - [Tools Reference](docs/tools/) - All tools with examples
 - [Advanced Usage](docs/advanced-usage.md) - Power user features
 - [Configuration](docs/configuration.md) - Environment variables, restrictions
+- [CPU Optimization Guide](docs/cpu-optimization-guide.md) - When and how to optimize CPU usage
 
 **🔧 Setup & Support**
 - [WSL Setup](docs/wsl-setup.md) - Windows users
