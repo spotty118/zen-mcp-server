@@ -10,6 +10,7 @@ from .consensus import ConsensusTool
 from .debug import DebugIssueTool
 from .docgen import DocgenTool
 from .listmodels import ListModelsTool
+from .parallelthink import ParallelThinkTool
 from .planner import PlannerTool
 from .precommit import PrecommitTool
 from .refactor import RefactorTool
@@ -28,6 +29,7 @@ __all__ = [
     "ChatTool",
     "ConsensusTool",
     "ListModelsTool",
+    "ParallelThinkTool",
     "PlannerTool",
     "PrecommitTool",
     "ChallengeTool",
