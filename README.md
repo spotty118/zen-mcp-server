@@ -248,6 +248,7 @@ DISABLED_TOOLS=
 
 **Model Support**
 - **Multiple providers** - Gemini, OpenAI, X.AI, OpenRouter, DIAL, Ollama
+- **Provider selection** - Force specific providers with `openrouter:model` syntax
 - **Latest models** - GPT-5, Gemini 2.5 Pro, O3, Grok-4, local Llama
 - **[Thinking modes](docs/advanced-usage.md#thinking-modes)** - Control reasoning depth vs cost
 - **Vision support** - Analyze images, diagrams, screenshots

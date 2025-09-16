@@ -192,6 +192,57 @@ The system automatically routes models to the appropriate provider:
 
 This ensures clean separation between local and cloud models while maintaining flexibility for unknown models.
 
+## Explicit Provider Selection
+
+**NEW**: You can now force specific providers using prefix syntax, bypassing the normal priority order.
+
+### When to Use Explicit Provider Selection
+
+Use explicit provider prefixes when you:
+- Want to use OpenRouter even when native APIs are available (for billing/usage tracking)
+- Need to compare the same model across different providers
+- Want to ensure consistent behavior across environments
+- Need to access provider-specific features or model versions
+
+### Supported Provider Prefixes
+
+| Prefix | Provider | Example | Result |
+|--------|----------|---------|---------|
+| `openrouter:` | OpenRouter | `openrouter:pro` | Forces OpenRouter's `google/gemini-2.5-pro` |
+| `google:`, `gemini:` | Native Gemini | `google:flash` | Forces native Gemini API |
+| `openai:` | Native OpenAI | `openai:o3` | Forces native OpenAI API |
+| `custom:`, `local:` | Custom/Local | `custom:llama3.2` | Forces custom endpoint |
+| `xai:`, `grok:` | X.AI | `xai:grok-3` | Forces native X.AI API |
+
+### Usage Examples
+
+**Force OpenRouter usage (even with native APIs configured):**
+```
+"Use openrouter:pro to analyze this code"      # → OpenRouter's google/gemini-2.5-pro
+"Use openrouter:flash to review quickly"      # → OpenRouter's google/gemini-2.5-flash
+"Use openrouter:opus for deep analysis"       # → OpenRouter's anthropic/claude-opus-4
+```
+
+**Force native provider usage:**
+```
+"Use google:pro for extended thinking"         # → Native Gemini API
+"Use openai:o3 for complex reasoning"          # → Native OpenAI API
+```
+
+**Force local model usage:**
+```
+"Use custom:llama3.2 to analyze this"          # → Local Ollama/vLLM instance
+"Use local:my-model to process this data"      # → Custom endpoint
+```
+
+### Backward Compatibility
+
+All existing model names continue to work unchanged:
+- `"Use pro to analyze"` → Uses normal priority order (native Gemini if available)
+- `"Use openrouter:pro to analyze"` → Forces OpenRouter usage
+
+This feature is completely additive and doesn't break any existing functionality.
+
 ## Model Configuration
 
 The server uses `conf/custom_models.json` to define model aliases and capabilities. You can:
