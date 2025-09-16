@@ -313,16 +313,43 @@ class SimpleTool(BaseTool):
 
                 model_name = DEFAULT_MODEL
 
+            # Enforce auto-mode requirements before trying to create the model context
+            if self._should_require_model_selection(model_name):
+                from providers.registry import ModelProviderRegistry
+
+                tool_category = self.get_model_category()
+                suggested_model = ModelProviderRegistry.get_preferred_fallback_model(tool_category)
+
+                if model_name.lower() == "auto":
+                    error_message = (
+                        "Model parameter is required in auto mode. "
+                        "Model 'auto' is not available with current configuration. "
+                        f"Suggested model for {self.get_name()}: '{suggested_model}' "
+                        f"(category: {tool_category.value})"
+                    )
+                else:
+                    available_models = self._get_available_models()
+                    available_models_text = ", ".join(available_models) if available_models else "none available"
+                    error_message = (
+                        f"Model '{model_name}' is not available with current API keys. "
+                        f"Available models: {available_models_text}. "
+                        f"Suggested model for {self.get_name()}: '{suggested_model}' "
+                        f"(category: {tool_category.value})"
+                    )
+
+                error_output = ToolOutput(status="error", content=error_message, content_type="text")
+                return [TextContent(type="text", text=error_output.model_dump_json())]
+
             # Parse provider prefix to get actual model name for API calls
             from providers.base import parse_provider_prefix
-            
+
             explicit_provider_type, actual_model_name = parse_provider_prefix(model_name)
-            
+
             # Store the original model name for context (may include prefix)
             self._current_model_name = model_name
             # Store the actual model name for API calls (prefix stripped)
             self._actual_model_name = actual_model_name
-            
+
             if explicit_provider_type:
                 logger.info(f"Explicit provider '{explicit_provider_type.value}' requested for model '{actual_model_name}'")
 
