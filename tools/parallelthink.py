@@ -16,7 +16,6 @@ Key Features:
 import asyncio
 import concurrent.futures
 import logging
-import multiprocessing
 import os
 import threading
 import time
@@ -32,6 +31,7 @@ from providers import ModelProviderRegistry
 from systemprompts import PARALLELTHINK_PROMPT
 from tools.shared.base_models import ToolRequest
 from tools.shared.base_tool import BaseTool
+from utils.core_context_storage import get_core_context_storage
 from utils.file_utils import read_files
 
 logger = logging.getLogger(__name__)
@@ -53,6 +53,8 @@ class ParallelThinkingPath:
         self.cpu_core = None  # Track which CPU core processed this path
         self.thread_id = None  # Track thread ID for debugging
         self.memory_usage = 0.0  # Track memory usage for optimization
+        self.core_context_used = False  # Track if core-specific context was utilized
+        self.shared_context_keys = []  # Keys that were shared with other cores
 
 
 class ParallelThinkRequest(ToolRequest):
@@ -104,6 +106,16 @@ class ParallelThinkRequest(ToolRequest):
         default=None, description="Batch size for processing (auto-calculated if not specified)"
     )
 
+    # Core-specific context options
+    enable_core_context: bool = Field(
+        default=True, description="Enable core-specific context isolation and sharing"
+    )
+    share_insights_between_cores: bool = Field(
+        default=True, description="Allow cores to share relevant insights and discoveries"
+    )
+    context_sharing_threshold: float = Field(
+        default=0.7, description="Confidence threshold for sharing insights between cores (0.0-1.0)"
+    )
     # Synthesis options
     synthesis_style: str = Field(
         default="comprehensive",
@@ -168,11 +180,11 @@ class ParallelThinkTool(BaseTool):
     def _get_optimal_cpu_cores(self, requested_cores: Optional[int] = None) -> int:
         """Detect optimal number of CPU cores to use"""
         available_cores = os.cpu_count() or 4  # Fallback to 4 if detection fails
-        
+
         if requested_cores:
             # Respect user preference but cap at available cores
             return min(requested_cores, available_cores)
-        
+
         # Smart auto-detection based on system resources
         if available_cores <= 2:
             return available_cores
@@ -187,7 +199,7 @@ class ParallelThinkTool(BaseTool):
         """Calculate optimal batch size for processing"""
         if total_paths <= cores:
             return 1  # Each path gets its own processing slot
-        
+
         # Aim for 2-3 batches per core for good utilization
         target_batches = cores * 2
         batch_size = max(1, total_paths // target_batches)
@@ -204,6 +216,102 @@ class ParallelThinkTool(BaseTool):
             logger.debug(f"Could not set CPU affinity to core {core_id}: {e}")
         return False
 
+    def _store_core_context(self, path: ParallelThinkingPath, core_id: int, context_data: dict,
+                           share_with_others: bool = False) -> None:
+        """Store context data for the specific core processing this path"""
+        try:
+            storage = get_core_context_storage()
+
+            # Store path-specific context
+            path_context_key = f"path_{path.path_id}_context"
+            storage.set_core_context(
+                key=path_context_key,
+                value=context_data,
+                core_id=core_id,
+                share_with_others=share_with_others
+            )
+
+            # Store approach-specific insights if sharing is enabled
+            if share_with_others and "insights" in context_data:
+                insights_key = f"approach_{path.approach.replace(' ', '_').lower()}_insights"
+                storage.set_core_context(
+                    key=insights_key,
+                    value=context_data["insights"],
+                    core_id=core_id,
+                    share_with_others=True
+                )
+                path.shared_context_keys.append(insights_key)
+
+            path.core_context_used = True
+            logger.debug(f"Stored context for path {path.path_id} on core {core_id}")
+
+        except Exception as e:
+            logger.warning(f"Could not store core context for path {path.path_id}: {e}")
+
+    def _retrieve_shared_insights(self, core_id: int, approach: str) -> dict:
+        """Retrieve insights shared by other cores that might be relevant"""
+        try:
+            storage = get_core_context_storage()
+            shared_insights = {}
+
+            # Look for insights from similar approaches
+            similar_approaches = [
+                "analytical", "creative", "systematic", "risk_focused",
+                "solution_oriented", "historical", "future_focused", "technical"
+            ]
+
+            for similar_approach in similar_approaches:
+                if similar_approach.lower() in approach.lower():
+                    continue  # Skip same approach
+
+                insights_key = f"approach_{similar_approach}_insights"
+                insights = storage.get_core_context(insights_key, core_id=None, check_shared=True)
+
+                if insights:
+                    shared_insights[similar_approach] = insights
+                    logger.debug(f"Retrieved shared insights from {similar_approach} approach for core {core_id}")
+
+            return shared_insights
+
+        except Exception as e:
+            logger.warning(f"Could not retrieve shared insights for core {core_id}: {e}")
+            return {}
+
+    def _detect_gpu_availability(self) -> dict:
+        """Detect light GPU support availability (keeping it optional to avoid overkill)"""
+        gpu_info = {
+            "available": False,
+            "type": None,
+            "memory": None,
+            "compute_capability": None
+        }
+
+        try:
+            # Try to detect NVIDIA GPU
+            import subprocess
+            result = subprocess.run(["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader"],
+                                  capture_output=True, text=True, timeout=5)
+            if result.returncode == 0 and result.stdout.strip():
+                gpu_info["available"] = True
+                gpu_info["type"] = "nvidia"
+                gpu_info["memory"] = result.stdout.strip().split(',')[1].strip()
+                logger.debug(f"Detected NVIDIA GPU: {gpu_info['memory']}")
+        except Exception:
+            pass
+
+        try:
+            # Try to detect integrated GPU or other accelerators
+            if os.path.exists("/sys/class/drm"):
+                gpu_info["available"] = True
+                gpu_info["type"] = "integrated"
+                logger.debug("Detected integrated GPU support")
+        except Exception:
+            pass
+
+        # Note: We detect GPU but don't use it by default to avoid overkill
+        # This information can be used for future optimizations
+        return gpu_info
+
     def _get_memory_usage(self) -> float:
         """Get current memory usage in MB (basic implementation)"""
         try:
@@ -215,7 +323,7 @@ class ParallelThinkTool(BaseTool):
             try:
                 import resource
                 return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024  # Convert to MB
-            except:
+            except Exception:
                 return 0.0
 
     async def prepare_prompt(self, request: ParallelThinkRequest) -> str:
@@ -282,22 +390,35 @@ class ParallelThinkTool(BaseTool):
         return available_models[:4]  # Limit to 4 different models
 
     async def _execute_thinking_path(
-        self, path: ParallelThinkingPath, prompt: str, system_prompt: str, files_content: str
+        self, path: ParallelThinkingPath, prompt: str, system_prompt: str, files_content: str,
+        enable_core_context: bool = True, share_insights: bool = True
     ) -> ParallelThinkingPath:
-        """Execute a single thinking path asynchronously"""
+        """Execute a single thinking path asynchronously with core context support"""
         start_time = time.time()
         start_memory = self._get_memory_usage()
-        
+
         # Record thread information for debugging
         path.thread_id = threading.get_ident()
 
         try:
+            # Get shared insights from other cores if enabled
+            shared_insights = {}
+            if enable_core_context and share_insights and path.cpu_core is not None:
+                shared_insights = self._retrieve_shared_insights(path.cpu_core, path.approach)
+
             # Prepare the full prompt for this path
             if path.prompt_variation:
                 full_prompt = path.prompt_variation
             else:
                 approach_instruction = f"\n\nTHINKING APPROACH: {path.approach}\n"
                 full_prompt = approach_instruction + prompt
+
+            # Add shared insights to prompt if available
+            if shared_insights:
+                insights_text = "\n\nSHARED INSIGHTS FROM OTHER CORES:\n"
+                for approach, insights in shared_insights.items():
+                    insights_text += f"- {approach.title()}: {insights}\n"
+                full_prompt += insights_text
 
             if files_content:
                 full_prompt = f"{full_prompt}\n\nFILE CONTEXT:\n{files_content}"
@@ -330,6 +451,37 @@ class ParallelThinkTool(BaseTool):
             path.execution_time = time.time() - start_time
             path.memory_usage = max(0, self._get_memory_usage() - start_memory)
 
+            # Store context and insights if enabled
+            if enable_core_context and path.cpu_core is not None:
+                # Extract key insights from the result for sharing
+                context_data = {
+                    "approach": path.approach,
+                    "execution_time": path.execution_time,
+                    "memory_usage": path.memory_usage,
+                    "model_used": model_name,
+                    "shared_insights_used": bool(shared_insights)
+                }
+
+                # Simple insight extraction (could be enhanced with NLP)
+                result_text = response.content.lower()
+                insights = []
+
+                if "performance" in result_text or "optimization" in result_text:
+                    insights.append("performance_considerations")
+                if "security" in result_text or "vulnerability" in result_text:
+                    insights.append("security_aspects")
+                if "scalability" in result_text or "scale" in result_text:
+                    insights.append("scalability_factors")
+                if "complexity" in result_text or "complex" in result_text:
+                    insights.append("complexity_analysis")
+
+                if insights:
+                    context_data["insights"] = insights
+
+                # Store with sharing enabled if insights were found
+                should_share = share_insights and len(insights) > 0
+                self._store_core_context(path, path.cpu_core, context_data, should_share)
+
         except Exception as e:
             path.error = str(e)
             path.execution_time = time.time() - start_time
@@ -339,26 +491,29 @@ class ParallelThinkTool(BaseTool):
         return path
 
     def _execute_thinking_path_sync(
-        self, path: ParallelThinkingPath, prompt: str, system_prompt: str, files_content: str, core_id: Optional[int] = None
+        self, path: ParallelThinkingPath, prompt: str, system_prompt: str, files_content: str,
+        core_id: Optional[int] = None, enable_core_context: bool = True, share_insights: bool = True
     ) -> ParallelThinkingPath:
         """Execute a single thinking path synchronously (for thread pool execution)"""
         if core_id is not None:
             path.cpu_core = core_id
             # Try to set CPU affinity if enabled
             self._set_cpu_affinity(core_id)
-        
+
         # Use asyncio.run to execute the async version in a thread
         loop = None
         try:
             loop = asyncio.get_event_loop()
         except RuntimeError:
             pass
-        
+
         if loop and loop.is_running():
             # We're in an async context, need to create a new event loop for this thread
             async def run_in_thread():
-                return await self._execute_thinking_path(path, prompt, system_prompt, files_content)
-            
+                return await self._execute_thinking_path(
+                    path, prompt, system_prompt, files_content, enable_core_context, share_insights
+                )
+
             # Create a new event loop for this thread
             new_loop = asyncio.new_event_loop()
             asyncio.set_event_loop(new_loop)
@@ -369,29 +524,32 @@ class ParallelThinkTool(BaseTool):
                 new_loop.close()
         else:
             # Not in an async context, can use asyncio.run
-            return asyncio.run(self._execute_thinking_path(path, prompt, system_prompt, files_content))
+            return asyncio.run(self._execute_thinking_path(
+                path, prompt, system_prompt, files_content, enable_core_context, share_insights
+            ))
 
     async def _execute_paths_hybrid(
-        self, paths: list[ParallelThinkingPath], prompt: str, system_prompt: str, files_content: str, 
-        cores: int, batch_size: int, enable_cpu_affinity: bool
+        self, paths: list[ParallelThinkingPath], prompt: str, system_prompt: str, files_content: str,
+        cores: int, batch_size: int, enable_cpu_affinity: bool, enable_core_context: bool = True,
+        share_insights: bool = True
     ) -> list[ParallelThinkingPath]:
-        """Execute thinking paths using hybrid concurrency strategy"""
+        """Execute thinking paths using hybrid concurrency strategy with core context support"""
         logger.info(f"Executing {len(paths)} thinking paths using {cores} cores with batch size {batch_size}")
-        
+
         # Create thread pool for CPU-bound operations
         with concurrent.futures.ThreadPoolExecutor(max_workers=cores, thread_name_prefix="ThinkingPath") as executor:
             # Submit all paths to thread pool
             future_to_path = {}
-            
+
             for i, path in enumerate(paths):
                 # Assign core if CPU affinity is enabled
                 core_id = i % cores if enable_cpu_affinity else None
                 future = executor.submit(
-                    self._execute_thinking_path_sync, 
-                    path, prompt, system_prompt, files_content, core_id
+                    self._execute_thinking_path_sync,
+                    path, prompt, system_prompt, files_content, core_id, enable_core_context, share_insights
                 )
                 future_to_path[future] = path
-            
+
             # Collect results as they complete
             completed_paths = []
             for future in concurrent.futures.as_completed(future_to_path):
@@ -404,14 +562,18 @@ class ParallelThinkTool(BaseTool):
                     path.execution_time = 0
                     completed_paths.append(path)
                     logger.error(f"Thread execution failed for path {path.path_id}: {e}")
-        
+
         return completed_paths
 
     async def _execute_paths_asyncio(
-        self, paths: list[ParallelThinkingPath], prompt: str, system_prompt: str, files_content: str
+        self, paths: list[ParallelThinkingPath], prompt: str, system_prompt: str, files_content: str,
+        enable_core_context: bool = True, share_insights: bool = True
     ) -> list[ParallelThinkingPath]:
         """Execute thinking paths using pure asyncio (original approach)"""
-        tasks = [self._execute_thinking_path(path, prompt, system_prompt, files_content) for path in paths]
+        tasks = [
+            self._execute_thinking_path(path, prompt, system_prompt, files_content, enable_core_context, share_insights)
+            for path in paths
+        ]
         return await asyncio.gather(*tasks, return_exceptions=True)
 
     def _choose_execution_strategy(self, strategy: str, num_paths: int, cores: int) -> str:
@@ -429,7 +591,7 @@ class ParallelThinkTool(BaseTool):
     def _synthesize_results(
         self, paths: list[ParallelThinkingPath], synthesis_style: str, request: ParallelThinkRequest
     ) -> str:
-        """Synthesize results from multiple thinking paths"""
+        """Synthesize results from multiple thinking paths with core context information"""
         successful_paths = [p for p in paths if p.result and not p.error]
 
         if not successful_paths:
@@ -463,22 +625,32 @@ class ParallelThinkTool(BaseTool):
 
         else:  # comprehensive
             synthesis = "## Comprehensive Parallel Thinking Analysis\n\n"
-            
+
             # Performance metrics
             total_time = max(p.execution_time for p in paths) if paths else 0
             total_memory = sum(getattr(p, 'memory_usage', 0) for p in successful_paths)
             avg_time = sum(p.execution_time for p in successful_paths) / len(successful_paths) if successful_paths else 0
-            
-            synthesis += f"**Execution Summary:**\n"
+
+            synthesis += "**Execution Summary:**\n"
             synthesis += f"- Total paths: {len(paths)} | Successful: {len(successful_paths)}\n"
             synthesis += f"- Total execution time: {total_time:.1f}s | Average per path: {avg_time:.1f}s\n"
             synthesis += f"- Memory usage: {total_memory:.1f}MB\n"
-            
+
             # CPU core utilization summary
-            cores_used = set(getattr(p, 'cpu_core', None) for p in paths if getattr(p, 'cpu_core', None) is not None)
+            cores_used = {getattr(p, 'cpu_core', None) for p in paths if getattr(p, 'cpu_core', None) is not None}
             if cores_used:
                 synthesis += f"- CPU cores utilized: {len(cores_used)} ({sorted(cores_used)})\n"
-            
+
+            # Core context utilization summary
+            context_enabled_paths = [p for p in successful_paths if getattr(p, 'core_context_used', False)]
+            if context_enabled_paths and request.enable_core_context:
+                synthesis += f"- Core context enabled: {len(context_enabled_paths)}/{len(successful_paths)} paths\n"
+
+                # Count shared insights
+                total_shared_keys = sum(len(getattr(p, 'shared_context_keys', [])) for p in context_enabled_paths)
+                if total_shared_keys > 0:
+                    synthesis += f"- Insights shared between cores: {total_shared_keys} instances\n"
+
             synthesis += "\n"
 
             for i, path in enumerate(successful_paths, 1):
@@ -490,6 +662,10 @@ class ParallelThinkTool(BaseTool):
                     synthesis += f" | **CPU Core:** {path.cpu_core}"
                 if hasattr(path, 'memory_usage') and path.memory_usage > 0:
                     synthesis += f" | **Memory:** {path.memory_usage:.1f}MB"
+                if hasattr(path, 'core_context_used') and path.core_context_used:
+                    synthesis += " | **Core Context:** Enabled"
+                if hasattr(path, 'shared_context_keys') and path.shared_context_keys:
+                    synthesis += f" | **Shared Insights:** {len(path.shared_context_keys)}"
                 synthesis += "\n\n"
                 synthesis += f"{path.result}\n\n---\n\n"
 
@@ -546,8 +722,21 @@ class ParallelThinkTool(BaseTool):
             optimal_cores = self._get_optimal_cpu_cores(request.cpu_cores)
             batch_size = request.batch_size or self._get_optimal_batch_size(len(paths), optimal_cores)
             execution_strategy = self._choose_execution_strategy(request.execution_strategy, len(paths), optimal_cores)
-            
+
+            # Detect GPU availability (optional, avoiding overkill)
+            gpu_info = self._detect_gpu_availability()
+            if gpu_info["available"]:
+                logger.info(f"GPU detected ({gpu_info['type']}) but using CPU-focused approach to avoid overkill")
+
             logger.info(f"Parallel execution: {len(paths)} paths, {optimal_cores} cores, strategy: {execution_strategy}")
+
+            # Get core context storage for statistics
+            core_storage = None
+            if request.enable_core_context:
+                try:
+                    core_storage = get_core_context_storage()
+                except Exception as e:
+                    logger.warning(f"Could not initialize core context storage: {e}")
 
             # Execute all thinking paths concurrently
             system_prompt = self.get_system_prompt()
@@ -557,19 +746,24 @@ class ParallelThinkTool(BaseTool):
                 if execution_strategy == "threads":
                     # Use thread pool for CPU-bound parallel execution
                     completed_paths = await self._execute_paths_hybrid(
-                        paths, request.prompt, system_prompt, files_content, 
-                        optimal_cores, batch_size, request.enable_cpu_affinity
+                        paths, request.prompt, system_prompt, files_content,
+                        optimal_cores, batch_size, request.enable_cpu_affinity,
+                        request.enable_core_context, request.share_insights_between_cores
                     )
                 elif execution_strategy == "hybrid":
                     # Use hybrid approach
                     completed_paths = await self._execute_paths_hybrid(
-                        paths, request.prompt, system_prompt, files_content, 
-                        optimal_cores, batch_size, request.enable_cpu_affinity
+                        paths, request.prompt, system_prompt, files_content,
+                        optimal_cores, batch_size, request.enable_cpu_affinity,
+                        request.enable_core_context, request.share_insights_between_cores
                     )
                 else:  # asyncio
                     # Use pure asyncio (original approach)
                     completed_paths = await asyncio.wait_for(
-                        self._execute_paths_asyncio(paths, request.prompt, system_prompt, files_content),
+                        self._execute_paths_asyncio(
+                            paths, request.prompt, system_prompt, files_content,
+                            request.enable_core_context, request.share_insights_between_cores
+                        ),
                         timeout=request.time_limit or 60
                     )
             except asyncio.TimeoutError:
@@ -580,7 +774,7 @@ class ParallelThinkTool(BaseTool):
                 logger.error(f"Error in parallel execution: {e}")
                 # Use any partial results available
                 completed_paths = [p for p in paths if p.result or p.error]
-                
+
             total_execution_time = time.time() - start_time
 
             # Synthesize results
@@ -588,10 +782,18 @@ class ParallelThinkTool(BaseTool):
 
             # Prepare response with enhanced metrics
             successful_count = len([
-                p for p in completed_paths 
+                p for p in completed_paths
                 if hasattr(p, "result") and p.result and not getattr(p, "error", None)
             ])
-            
+
+            # Get core context statistics
+            core_context_stats = {}
+            if request.enable_core_context and core_storage:
+                try:
+                    core_context_stats = core_storage.get_core_statistics()
+                except Exception as e:
+                    logger.warning(f"Could not get core context statistics: {e}")
+
             response = {
                 "parallel_thinking_analysis": synthesis,
                 "execution_summary": {
@@ -610,10 +812,16 @@ class ParallelThinkTool(BaseTool):
                     "execution_strategy": execution_strategy,
                     "batch_size": batch_size,
                     "total_memory_usage": sum([getattr(p, "memory_usage", 0) for p in completed_paths]),
-                    "cores_utilized": sorted(set(
-                        getattr(p, "cpu_core", None) for p in completed_paths 
+                    "cores_utilized": sorted({
+                        getattr(p, "cpu_core", None) for p in completed_paths
                         if getattr(p, "cpu_core", None) is not None
-                    )),
+                    }),
+                    # Core context metrics
+                    "core_context_enabled": request.enable_core_context,
+                    "insights_sharing_enabled": request.share_insights_between_cores,
+                    "core_context_stats": core_context_stats,
+                    "gpu_detected": gpu_info.get("available", False),
+                    "gpu_type": gpu_info.get("type", None) if gpu_info.get("available") else None,
                 },
             }
 
@@ -631,6 +839,8 @@ class ParallelThinkTool(BaseTool):
                             "cpu_core": getattr(path, "cpu_core", None),
                             "thread_id": getattr(path, "thread_id", None),
                             "memory_usage": getattr(path, "memory_usage", 0),
+                            "core_context_used": getattr(path, "core_context_used", False),
+                            "shared_context_keys": getattr(path, "shared_context_keys", []),
                         }
                         if path.model:
                             path_result["model"] = path.model
