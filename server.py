@@ -625,12 +625,49 @@ async def handle_list_tools() -> list[Tool]:
         annotations = tool.get_annotations()
         tool_annotations = ToolAnnotations(**annotations) if annotations else None
 
+        # Create proper output schema for MCP protocol compliance
+        output_schema = {
+            "type": "object",
+            "description": "Tool execution result with status and content",
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "enum": ["success", "error", "partial"],
+                    "description": "Execution status indicator"
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Main response content from the tool"
+                },
+                "content_type": {
+                    "type": "string",
+                    "enum": ["text", "json", "markdown"],
+                    "description": "Format of the content field"
+                },
+                "metadata": {
+                    "type": "object",
+                    "description": "Additional metadata about the execution"
+                }
+            },
+            "required": ["status", "content", "content_type"]
+        }
+
+        # Create meta information for the tool
+        meta = {
+            "server_version": __version__,
+            "tool_category": tool.get_model_category().value if hasattr(tool, 'get_model_category') else "general",
+            "requires_model": tool.requires_model() if hasattr(tool, 'requires_model') else True
+        }
+
         tools.append(
             Tool(
                 name=tool.name,
+                title=tool.name.title().replace('_', ' '),  # Convert snake_case to Title Case
                 description=tool.description,
                 inputSchema=tool.get_input_schema(),
+                outputSchema=output_schema,
                 annotations=tool_annotations,
+                meta=meta,
             )
         )
 
@@ -1167,8 +1204,14 @@ async def handle_list_prompts() -> list[Prompt]:
             prompts.append(
                 Prompt(
                     name=template_info["name"],
+                    title=template_info["name"].title().replace('_', ' '),  # Convert snake_case to Title Case
                     description=template_info["description"],
                     arguments=[],  # MVP: no structured args
+                    meta={
+                        "server_version": __version__,
+                        "tool_name": tool_name,
+                        "template_type": "rich"
+                    }
                 )
             )
         else:
@@ -1176,8 +1219,14 @@ async def handle_list_prompts() -> list[Prompt]:
             prompts.append(
                 Prompt(
                     name=tool_name,
+                    title=tool_name.title().replace('_', ' '),  # Convert snake_case to Title Case
                     description=f"Use {tool.name} tool",
                     arguments=[],
+                    meta={
+                        "server_version": __version__,
+                        "tool_name": tool_name,
+                        "template_type": "fallback"
+                    }
                 )
             )
 
@@ -1185,8 +1234,14 @@ async def handle_list_prompts() -> list[Prompt]:
     prompts.append(
         Prompt(
             name="continue",
+            title="Continue Conversation",
             description="Continue the previous conversation using the chat tool",
             arguments=[],
+            meta={
+                "server_version": __version__,
+                "special_prompt": True,
+                "template_type": "continuation"
+            }
         )
     )
 
