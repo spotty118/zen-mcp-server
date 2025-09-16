@@ -1,0 +1,11 @@
+#!/bin/bash
+# Zen MCP Server - Simplified startup command
+#
+# This is a shortened alias for starting the Zen MCP Server
+# instead of using the longer './run-server.sh' command
+
+# Get the directory of this script
+DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Execute the full run-server.sh script with all arguments passed through
+exec "$DIR/run-server.sh" "$@"

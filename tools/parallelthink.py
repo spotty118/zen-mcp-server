@@ -125,8 +125,11 @@ class ParallelThinkRequest(ToolRequest):
     enable_agent_mode: bool = Field(
         default=True, description="Enable agent-based execution where each core acts as an autonomous agent"
     )
+    auto_select_agents: bool = Field(
+        default=True, description="Automatically select optimal agents based on task characteristics and CPU cores"
+    )
     agent_roles: Optional[list[str]] = Field(
-        default=None, description="Specific agent roles to use (security_analyst, performance_optimizer, etc.)"
+        default=None, description="Specific agent roles to use (security_analyst, performance_optimizer, etc.) - ignored if auto_select_agents is True"
     )
     enable_agent_communication: bool = Field(
         default=True, description="Enable communication between agents during parallel thinking"
@@ -613,8 +616,10 @@ class ParallelThinkTool(BaseTool):
 
         # Get agent if assigned
         agent = None
+        agent_api_client = None
         if agent_system and path.assigned_agent:
             agent = agent_system.agents.get(path.assigned_agent)
+            agent_api_client = agent_system.get_agent_api_client(path.assigned_agent)
             if agent:
                 agent.update_status(AgentStatus.THINKING)
                 agent.add_thought(
@@ -666,31 +671,57 @@ class ParallelThinkTool(BaseTool):
             if files_content:
                 full_prompt = f"{full_prompt}\n\nFILE CONTEXT:\n{files_content}"
 
-            # Get provider and model
-            registry = ModelProviderRegistry()
-            if path.model:
-                # Try to use specified model
-                try:
-                    provider = registry.get_provider_for_model(path.model)
-                    model_name = path.model
-                except Exception as e:
-                    logger.warning(f"Could not use model {path.model}: {e}, falling back to default")
+            # Use agent's own API client if available, otherwise fall back to centralized approach
+            if agent_api_client:
+                # Agent makes its own API call
+                logger.debug(f"Agent {path.assigned_agent} making direct API call")
+                
+                api_call = await agent_api_client.make_api_call(
+                    prompt=full_prompt,
+                    model_name=path.model,
+                    parameters={
+                        "system_prompt": system_prompt,
+                        "temperature": self.get_default_temperature(),
+                        "thinking_mode": self.get_default_thinking_mode()
+                    }
+                )
+                
+                if api_call.status == "completed" and api_call.response:
+                    path.result = api_call.response
+                    logger.info(f"Agent {path.assigned_agent} completed API call successfully")
+                else:
+                    raise Exception(f"Agent API call failed: {api_call.error}")
+                    
+            else:
+                # Fallback to centralized approach
+                logger.debug(f"Using centralized API call for path {path.path_id}")
+                
+                # Get provider and model
+                registry = ModelProviderRegistry()
+                if path.model:
+                    # Try to use specified model
+                    try:
+                        provider = registry.get_provider_for_model(path.model)
+                        model_name = path.model
+                    except Exception as e:
+                        logger.warning(f"Could not use model {path.model}: {e}, falling back to default")
+                        provider = registry.get_default_provider()
+                        model_name = provider.get_default_model()
+                else:
                     provider = registry.get_default_provider()
                     model_name = provider.get_default_model()
-            else:
-                provider = registry.get_default_provider()
-                model_name = provider.get_default_model()
 
-            # Execute the thinking
-            response = provider.generate_content(
-                prompt=full_prompt,
-                model_name=model_name,
-                system_prompt=system_prompt,
-                temperature=self.get_default_temperature(),
-                thinking_mode=self.get_default_thinking_mode(),
-            )
+                # Execute the thinking
+                response = provider.generate_content(
+                    prompt=full_prompt,
+                    model_name=model_name,
+                    system_prompt=system_prompt,
+                    temperature=self.get_default_temperature(),
+                    thinking_mode=self.get_default_thinking_mode(),
+                )
 
-            path.result = response.content
+                path.result = response.content
+
             path.execution_time = time.time() - start_time
             path.memory_usage = max(0, self._get_memory_usage() - start_memory)
 
@@ -1065,22 +1096,72 @@ class ParallelThinkTool(BaseTool):
                 try:
                     agent_system = get_agent_communication_system()
                     
-                    # Determine agent roles for each path
-                    agent_roles = self._determine_agent_roles(request.agent_roles, len(paths))
-                    
-                    # Create agents for each core/path
-                    for i, (path, role) in enumerate(zip(paths, agent_roles)):
-                        core_id = i % optimal_cores
-                        agent = agent_system.register_agent(core_id=core_id, role=role)
-                        agents.append(agent)
-                        path.assigned_agent = agent.agent_id
+                    # Use automatic agent selection if enabled
+                    if request.auto_select_agents:
+                        from utils.automatic_agent_selector import get_automatic_agent_selector, TaskCharacteristics, TaskType, TaskComplexity
                         
-                        # Add initial thought about the task
-                        agent.add_thought(
-                            thought_type="analysis",
-                            content=f"Assigned to approach: {path.approach}. Beginning parallel thinking analysis.",
-                            confidence=0.8
+                        # Get the automatic agent selector
+                        agent_selector = get_automatic_agent_selector(agent_system)
+                        
+                        # Analyze the task to determine characteristics
+                        task_characteristics = agent_selector.analyze_task_from_prompt(
+                            request.prompt, request.files
                         )
+                        
+                        # Override task type for parallel thinking
+                        task_characteristics.task_type = TaskType.PARALLEL_THINKING
+                        
+                        logger.info(f"Auto-selecting agents for {task_characteristics.task_type.value} "
+                                   f"task with {task_characteristics.complexity.value} complexity")
+                        
+                        # Select optimal agents for this task
+                        selected_agent_ids, coordinator_id = agent_selector.select_agents_for_task(task_characteristics)
+                        
+                        # If we have fewer agents than paths, register additional agents
+                        if len(selected_agent_ids) < len(paths):
+                            logger.info(f"Need {len(paths)} agents but only {len(selected_agent_ids)} selected, registering additional agents")
+                            
+                            # Get available agent roles for the additional agents
+                            used_roles = [agent_system.agents[aid].role for aid in selected_agent_ids]
+                            available_roles = [role for role in AgentRole if role not in used_roles]
+                            
+                            # Register additional agents
+                            for i in range(len(selected_agent_ids), len(paths)):
+                                core_id = i % optimal_cores
+                                role = available_roles[i % len(available_roles)] if available_roles else AgentRole.GENERALIST
+                                agent = agent_system.register_agent(core_id=core_id, role=role)
+                                selected_agent_ids.append(agent.agent_id)
+                        
+                        # Use the selected agents
+                        for i, agent_id in enumerate(selected_agent_ids[:len(paths)]):
+                            agent = agent_system.agents[agent_id]
+                            agents.append(agent)
+                            paths[i].assigned_agent = agent_id
+                            
+                            # Add initial thought about the task
+                            agent.add_thought(
+                                thought_type="analysis",
+                                content=f"Auto-selected for approach: {paths[i].approach}. Beginning parallel thinking analysis.",
+                                confidence=0.8
+                            )
+                    else:
+                        # Manual agent role assignment (original logic)
+                        # Determine agent roles for each path
+                        agent_roles = self._determine_agent_roles(request.agent_roles, len(paths))
+                        
+                        # Create agents for each core/path
+                        for i, (path, role) in enumerate(zip(paths, agent_roles)):
+                            core_id = i % optimal_cores
+                            agent = agent_system.register_agent(core_id=core_id, role=role)
+                            agents.append(agent)
+                            path.assigned_agent = agent.agent_id
+                            
+                            # Add initial thought about the task
+                            agent.add_thought(
+                                thought_type="analysis",
+                                content=f"Assigned to approach: {path.approach}. Beginning parallel thinking analysis.",
+                                confidence=0.8
+                            )
                     
                     # Create a team for this parallel thinking session
                     if len(agents) > 1:
