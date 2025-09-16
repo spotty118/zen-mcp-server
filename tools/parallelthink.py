@@ -154,7 +154,7 @@ class ParallelThinkTool(BaseTool):
 
     name = "parallelthink"
     description = (
-        "PARALLEL MULTI-AGENT REASONING - Execute multiple thinking processes using specialized AI agents "
+        "CONCURRENT PARALLEL MULTI-AGENT REASONING - Execute multiple thinking processes using specialized AI agents "
         "that communicate and collaborate. Each CPU core acts as an autonomous agent with specific roles "
         "(Security Analyst, Performance Optimizer, Architecture Reviewer, etc.) that maintain individual "
         "thoughts and context while sharing insights. Perfect for: complex problem-solving, architectural "
@@ -617,6 +617,7 @@ class ParallelThinkTool(BaseTool):
         # Get agent if assigned
         agent = None
         agent_api_client = None
+        resolved_model_name: Optional[str] = path.model
         if agent_system and path.assigned_agent:
             agent = agent_system.agents.get(path.assigned_agent)
             agent_api_client = agent_system.get_agent_api_client(path.assigned_agent)
@@ -689,6 +690,7 @@ class ParallelThinkTool(BaseTool):
                     
                     if api_call.status == "completed" and api_call.response:
                         path.result = api_call.response
+                        resolved_model_name = api_call.model_name or resolved_model_name
                         logger.info(f"Agent {path.assigned_agent} completed API call successfully")
                     else:
                         # Check if this is a provider availability issue
@@ -704,53 +706,91 @@ class ParallelThinkTool(BaseTool):
             if not agent_api_client or agent_api_failed:
                 # Fallback to centralized approach
                 logger.debug(f"Using centralized API call for path {path.path_id}")
-                
+
                 # Get provider and model
                 registry = ModelProviderRegistry()
-                available_providers = registry.get_available_providers()
-                
-                if not available_providers:
+
+                # Normalise provider list to handle mocks in unit tests gracefully
+                available_providers: list[Any] = []
+                try:
+                    raw_providers = registry.get_available_providers()
+                except Exception as exc:  # pragma: no cover - defensive logging
+                    logger.debug(f"Failed to obtain available providers: {exc}")
+                    raw_providers = None
+
+                if raw_providers:
+                    if isinstance(raw_providers, (list, tuple, set)):
+                        available_providers = list(raw_providers)
+                    else:
+                        try:
+                            available_providers = list(raw_providers)
+                        except TypeError:
+                            # Some tests patch the registry with simple mocks; treat those as no providers
+                            available_providers = []
+
+                provider = None
+                selected_model_name: Optional[str] = resolved_model_name
+
+                if path.model:
+                    # Try to use specified model
+                    try:
+                        provider = registry.get_provider_for_model(path.model)
+                        selected_model_name = path.model
+                    except Exception as e:
+                        logger.warning(f"Could not use model {path.model}: {e}, trying first available provider")
+
+                if not provider and available_providers:
+                    # Get first available provider
+                    provider_type = available_providers[0]
+                    provider = registry.get_provider(provider_type)
+                    available_models: list[str] = []
+
+                    get_models = getattr(registry, "get_available_model_names", None)
+                    if callable(get_models):
+                        try:
+                            available_models = get_models(provider_type)
+                        except Exception as exc:  # pragma: no cover - defensive logging
+                            logger.debug(f"Could not list models for provider {provider_type}: {exc}")
+
+                    if available_models:
+                        selected_model_name = available_models[0]
+
+                if not provider:
+                    # Fall back to registry default provider (used in unit tests)
+                    default_provider_fn = getattr(registry, "get_default_provider", None)
+                    if callable(default_provider_fn):
+                        provider = default_provider_fn()
+                        if provider and not selected_model_name:
+                            default_model_getter = getattr(provider, "get_default_model", None)
+                            if callable(default_model_getter):
+                                selected_model_name = default_model_getter()
+                            if not selected_model_name:
+                                selected_model_name = getattr(provider, "default_model", None)
+
+                if provider and selected_model_name:
+                    # Execute the thinking
+                    response = provider.generate_content(
+                        prompt=full_prompt,
+                        model_name=selected_model_name,
+                        system_prompt=system_prompt,
+                        temperature=self.get_default_temperature(),
+                        thinking_mode=self.get_default_thinking_mode(),
+                    )
+                    path.result = getattr(response, "content", response)
+                    resolved_model_name = selected_model_name
+                elif not available_providers and not provider:
                     # No providers available at all - this is expected when running outside server context
-                    logger.warning(f"No providers available for centralized approach in path {path.path_id}. "
-                                  "This occurs when using tools outside the server context without configured providers.")
+                    logger.warning(
+                        f"No providers available for centralized approach in path {path.path_id}. "
+                        "This occurs when using tools outside the server context without configured providers."
+                    )
                     path.result = "Error: No AI providers available. Please configure API keys and restart the server."
                     path.error = "No providers configured"
                 else:
-                    # Try to get a provider and model
-                    provider = None
-                    model_name = None
-                    
-                    if path.model:
-                        # Try to use specified model
-                        try:
-                            provider = registry.get_provider_for_model(path.model)
-                            model_name = path.model
-                        except Exception as e:
-                            logger.warning(f"Could not use model {path.model}: {e}, trying first available provider")
-                            
-                    if not provider and available_providers:
-                        # Get first available provider
-                        provider_type = available_providers[0]
-                        provider = registry.get_provider(provider_type)
-                        if provider:
-                            available_models = registry.get_available_model_names(provider_type)
-                            model_name = available_models[0] if available_models else "default"
-                    
-                    if provider and model_name:
-                        # Execute the thinking
-                        response = provider.generate_content(
-                            prompt=full_prompt,
-                            model_name=model_name,
-                            system_prompt=system_prompt,
-                            temperature=self.get_default_temperature(),
-                            thinking_mode=self.get_default_thinking_mode(),
-                        )
-                        path.result = response.content
-                    else:
-                        # Even the centralized approach failed
-                        logger.error(f"No providers or models available for centralized approach in path {path.path_id}")
-                        path.result = "Error: No AI providers or models available for processing."
-                        path.error = "No providers or models available"
+                    # Even the centralized approach failed
+                    logger.error(f"No providers or models available for centralized approach in path {path.path_id}")
+                    path.result = "Error: No AI providers or models available for processing."
+                    path.error = "No providers or models available"
 
             path.execution_time = time.time() - start_time
             path.memory_usage = max(0, self._get_memory_usage() - start_memory)
@@ -771,15 +811,22 @@ class ParallelThinkTool(BaseTool):
                     "approach": path.approach,
                     "execution_time": path.execution_time,
                     "memory_usage": path.memory_usage,
-                    "model_used": model_name,
+                    "model_used": resolved_model_name or "unspecified",
                     "shared_insights_used": bool(shared_insights),
                     "agent_insights_used": bool(agent_insights),
                     "assigned_agent": path.assigned_agent
                 }
 
                 # Enhanced insight extraction
-                result_text = response.content.lower()
-                insights = []
+                raw_result = path.result
+                if raw_result is None:
+                    result_text = ""
+                elif isinstance(raw_result, str):
+                    result_text = raw_result.lower()
+                else:
+                    result_text = str(getattr(raw_result, "content", raw_result)).lower()
+
+                insights: list[str] = []
 
                 if "performance" in result_text or "optimization" in result_text:
                     insights.append("performance_considerations")
@@ -1118,6 +1165,26 @@ class ParallelThinkTool(BaseTool):
                 except Exception as e:
                     logger.warning(f"Could not initialize core context storage: {e}")
 
+            # Determine if any providers are available for agent mode; disable when none
+            providers_available = True
+            try:
+                registry_check = ModelProviderRegistry()
+                raw_available = registry_check.get_available_providers()
+                if not raw_available:
+                    providers_available = False
+                elif isinstance(raw_available, (list, tuple, set)):
+                    providers_available = len(raw_available) > 0
+                else:
+                    try:
+                        providers_available = len(list(raw_available)) > 0
+                    except TypeError:
+                        providers_available = False
+            except Exception:
+                providers_available = False
+
+            if not providers_available:
+                request.enable_agent_mode = False
+
             # Initialize agent communication system if agent mode is enabled
             agent_system = None
             agents = []
@@ -1125,7 +1192,7 @@ class ParallelThinkTool(BaseTool):
             if request.enable_agent_mode:
                 try:
                     agent_system = get_agent_communication_system()
-                    
+
                     # Use automatic agent selection if enabled
                     if request.auto_select_agents:
                         from utils.automatic_agent_selector import get_automatic_agent_selector, TaskCharacteristics, TaskType, TaskComplexity
