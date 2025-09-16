@@ -71,6 +71,7 @@ from tools import (  # noqa: E402
     DebugIssueTool,
     DocgenTool,
     ListModelsTool,
+    ParallelThinkTool,
     PlannerTool,
     PrecommitTool,
     RefactorTool,
@@ -265,6 +266,7 @@ def filter_disabled_tools(all_tools: dict[str, Any]) -> dict[str, Any]:
 TOOLS = {
     "chat": ChatTool(),  # Interactive development chat and brainstorming
     "thinkdeep": ThinkDeepTool(),  # Step-by-step deep thinking workflow with expert analysis
+    "parallelthink": ParallelThinkTool(),  # Concurrent multi-path reasoning with parallel thinking
     "planner": PlannerTool(),  # Interactive sequential planner using workflow architecture
     "consensus": ConsensusTool(),  # Step-by-step consensus workflow with multi-model analysis
     "codereview": CodeReviewTool(),  # Comprehensive step-by-step code review workflow with expert analysis
@@ -293,6 +295,11 @@ PROMPT_TEMPLATES = {
         "name": "thinkdeeper",
         "description": "Step-by-step deep thinking workflow with expert analysis",
         "template": "Start comprehensive deep thinking workflow with {model} using {thinking_mode} thinking mode",
+    },
+    "parallelthink": {
+        "name": "parallel",
+        "description": "Concurrent multi-path reasoning with parallel thinking approaches",
+        "template": "Start parallel thinking analysis with {model} using {thinking_paths} concurrent paths",
     },
     "planner": {
         "name": "planner",
