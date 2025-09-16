@@ -2,50 +2,86 @@
 
 ## Overview
 
-The parallel thinking tool has been significantly enhanced to provide smarter CPU core utilization and advanced multithreading capabilities. These improvements deliver better performance, resource efficiency, and intelligent workload management.
+The parallel thinking tool has been significantly enhanced to provide smarter CPU core utilization and advanced multithreading capabilities with **cross-platform compatibility** for Intel, AMD, and Apple Silicon processors on Windows, Linux, and macOS. These improvements deliver better performance, resource efficiency, and intelligent workload management.
 
 ## Key Enhancements
 
-### 1. Smart CPU Core Detection & Allocation
+### 1. Cross-Platform CPU Architecture Detection
 
 **Auto-Detection:**
-- Automatically detects available CPU cores
-- Intelligently reserves cores for system operations
-- Provides optimal core allocation recommendations
+- Automatically detects CPU architecture (Intel, AMD, Apple Silicon)
+- Identifies platform (Windows, Linux, macOS)
+- Recognizes special features (3D V-Cache, Performance/Efficiency cores)
+- Provides architecture-specific optimization recommendations
+
+**Supported Architectures:**
+- **Intel CPUs**: x86_64 with E-core detection for 12th gen+
+- **AMD CPUs**: x86_64 with 3D V-Cache optimization for Ryzen X3D series
+- **Apple Silicon**: ARM64 with Performance/Efficiency core awareness (M1, M2, M3+)
+- **Generic ARM**: ARM/AArch64 detection for other ARM processors
+
+### 2. Smart CPU Core Detection & Allocation
+
+**Architecture-Aware Allocation:**
+- **Apple Silicon**: Leverages P/E core design, optimizes for up to 10+ cores
+- **AMD 3D V-Cache**: Aggressive core usage for cache-optimized workloads
+- **Intel with E-cores**: Conservative allocation balancing P and E cores
+- **Generic systems**: Falls back to traditional optimization logic
 
 **Smart Allocation Logic:**
 - 2 cores: Use all available
 - 3-4 cores: Reserve 1 for system
 - 5-8 cores: Use most cores with headroom
-- 8+ cores: Cap at 8 for optimal performance
+- 8+ cores: Architecture-specific caps (8-12 cores depending on CPU type)
 
-### 2. Hybrid Concurrency Model
+### 3. Cross-Platform CPU Affinity Optimization
 
-**Execution Strategies:**
-- `asyncio`: Pure async for I/O-bound operations (original approach)
-- `threads`: ThreadPoolExecutor for CPU-bound parallel processing
-- `hybrid`: Intelligent combination of both approaches
-- `adaptive`: Smart auto-selection based on workload characteristics
-
-**Strategy Selection Logic:**
-```python
-if workload <= 2_paths:
-    use "asyncio"  # Simple async for small workloads
-elif cores >= 4 and paths >= cores:
-    use "threads"  # True parallelism for CPU-bound work
-else:
-    use "hybrid"   # Balanced approach
-```
-
-### 3. CPU Affinity Optimization
+**Platform Support:**
+- **Linux**: Native `sched_setaffinity` support for precise core assignment
+- **Windows**: psutil-based CPU affinity when available
+- **macOS**: Thread priority hints for Performance core scheduling
+- **Graceful degradation**: Falls back safely on unsupported systems
 
 **Features:**
 - Sets CPU affinity for worker threads when supported
 - Distributes thinking paths across specific CPU cores
 - Reduces context switching and improves cache performance
-- Gracefully degrades on unsupported systems
+- Architecture-aware core assignment preferences
 
-### 4. Memory Usage Monitoring
+### 4. Architecture-Aware Execution Strategy Selection
+
+**Execution Strategies:**
+- `asyncio`: Pure async for I/O-bound operations (original approach)
+- `threads`: ThreadPoolExecutor for CPU-bound parallel processing
+- `hybrid`: Intelligent combination of both approaches
+- `adaptive`: Smart auto-selection based on CPU architecture and workload
+
+**Architecture-Specific Strategy Logic:**
+```python
+# Apple Silicon (M1/M2/M3+)
+if apple_silicon:
+    if paths <= 2: "asyncio"
+    else: "hybrid"  # Leverage P/E core design
+
+# AMD 3D V-Cache (Ryzen X3D)
+elif amd_3d_cache:
+    if paths <= 2: "asyncio"
+    elif paths >= 4: "threads"  # Utilize large cache
+    else: "hybrid"
+
+# Intel with E-cores (12th gen+)
+elif intel_with_ecores:
+    if paths <= 2: "asyncio"
+    else: "hybrid"  # Balance P and E cores
+
+# Traditional CPUs
+else:
+    if paths <= 2: "asyncio"
+    elif cores >= 4 and paths >= cores: "threads"
+    else: "hybrid"
+```
+
+### 5. Memory Usage Monitoring
 
 **Capabilities:**
 - Real-time memory usage tracking per thinking path
@@ -53,7 +89,7 @@ else:
 - Memory-aware optimization decisions
 - Resource usage metrics in synthesis reports
 
-### 5. Intelligent Batch Processing
+### 6. Intelligent Batch Processing
 
 **Optimization:**
 - Calculates optimal batch sizes based on core count
@@ -61,7 +97,7 @@ else:
 - Caps batch size at 3 for memory efficiency
 - Adapts to different workload sizes automatically
 
-### 6. Enhanced Performance Metrics
+### 7. Enhanced Performance Metrics
 
 **New Metrics:**
 - CPU cores utilized with specific core IDs
@@ -213,14 +249,37 @@ request = ParallelThinkRequest(
 - Dynamic optimization requirements
 - Production environments
 
-### System-Specific Tuning
+### Cross-Platform System-Specific Tuning
 
-**High-Core Systems (8+ cores):**
+**Apple Silicon (M1/M2/M3+ Macs):**
 ```python
-cpu_cores=8,               # Cap for optimal performance
-execution_strategy="threads",
-enable_cpu_affinity=True,
+cpu_cores=10,               # Can handle more cores due to P/E design
+execution_strategy="adaptive", # Let system choose hybrid/threads
+enable_cpu_affinity=False,  # macOS doesn't support direct affinity
+thinking_paths=6,           # Take advantage of performance cores
+```
+
+**AMD Ryzen with 3D V-Cache (X3D series):**
+```python
+cpu_cores=12,               # Leverage large cache for more threads
+execution_strategy="threads", # Threading benefits from 3D V-Cache
+enable_cpu_affinity=True,   # Linux/Windows affinity helps
+batch_size=2,               # Larger batches work well with cache
+```
+
+**Intel 12th gen+ with E-cores:**
+```python
+cpu_cores=8,                # Conservative with P/E core mix
+execution_strategy="hybrid", # Balance P and E core usage
+enable_cpu_affinity=True,   # Helps separate P and E core tasks
 batch_size=2,
+```
+
+**Windows Systems:**
+```python
+execution_strategy="adaptive", # Let system choose optimal strategy
+enable_cpu_affinity=True,   # Uses psutil when available
+# Note: Install psutil for best Windows performance
 ```
 
 **Memory-Constrained Systems:**
@@ -258,6 +317,28 @@ Enhanced logging includes:
 - Resource usage warnings
 - Performance optimization suggestions
 
+## Cross-Platform Compatibility
+
+### Supported Platforms
+- **Windows**: Full CPU affinity support via psutil, architecture detection
+- **Linux**: Native CPU affinity, complete feature support
+- **macOS**: Thread priority hints, Apple Silicon P/E core awareness
+
+### Supported CPU Architectures
+- **Intel x86_64**: Including 12th gen+ with E-cores
+- **AMD x86_64**: Including Ryzen X3D series with 3D V-Cache
+- **Apple Silicon ARM64**: M1, M2, M3+ with Performance/Efficiency cores
+- **Generic ARM**: ARM/AArch64 processors
+
+### Feature Availability Matrix
+| Feature | Linux | Windows | macOS | Notes |
+|---------|--------|---------|-------|-------|
+| CPU Architecture Detection | ✅ | ✅ | ✅ | Full support |
+| CPU Affinity | ✅ | ✅* | ⚠️ | *Requires psutil on Windows |
+| Core Optimization | ✅ | ✅ | ✅ | Architecture-aware |
+| Thread Pool | ✅ | ✅ | ✅ | Full support |
+| Memory Monitoring | ✅ | ✅ | ✅ | Multi-platform fallbacks |
+
 ## Backward Compatibility
 
 All enhancements are fully backward compatible:
@@ -281,12 +362,29 @@ No changes required - the system automatically uses enhanced features with safe 
 
 2. **Enable CPU affinity on supported systems:**
    ```python
-   enable_cpu_affinity=True  # Usually beneficial
+   enable_cpu_affinity=True  # Usually beneficial on Linux/Windows
    ```
 
-3. **Monitor memory usage for large workloads:**
+3. **Install psutil for Windows users:**
+   ```bash
+   pip install psutil  # Enables CPU affinity support on Windows
+   ```
+
+4. **Monitor memory usage for large workloads:**
    ```python
    # Check memory_usage in response for optimization opportunities
+   ```
+
+5. **Tune for specific architectures:**
+   ```python
+   # Apple Silicon
+   cpu_cores=10, execution_strategy="adaptive"
+   
+   # AMD 3D V-Cache
+   cpu_cores=12, execution_strategy="threads"
+   
+   # Intel with E-cores
+   cpu_cores=8, execution_strategy="hybrid"
    ```
 
 4. **Tune for specific workloads:**
@@ -300,4 +398,4 @@ No changes required - the system automatically uses enhanced features with safe 
    enable_cpu_affinity=False
    ```
 
-The enhanced parallel thinking tool now provides significantly improved performance, smarter resource utilization, and better scalability across different hardware configurations.
+The enhanced parallel thinking tool now provides significantly improved performance, smarter resource utilization, and **comprehensive cross-platform compatibility** for Intel, AMD, and Apple Silicon processors across Windows, Linux, and macOS platforms. The system intelligently adapts to different CPU architectures to deliver optimal performance regardless of the underlying hardware.
