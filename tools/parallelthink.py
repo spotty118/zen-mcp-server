@@ -14,7 +14,12 @@ Key Features:
 """
 
 import asyncio
+import concurrent.futures
 import logging
+import multiprocessing
+import os
+import threading
+import time
 from typing import TYPE_CHECKING, Any, Optional
 
 from pydantic import Field
@@ -45,6 +50,9 @@ class ParallelThinkingPath:
         self.result = None
         self.error = None
         self.execution_time = 0.0
+        self.cpu_core = None  # Track which CPU core processed this path
+        self.thread_id = None  # Track thread ID for debugging
+        self.memory_usage = 0.0  # Track memory usage for optimization
 
 
 class ParallelThinkRequest(ToolRequest):
@@ -78,6 +86,22 @@ class ParallelThinkRequest(ToolRequest):
     )
     time_limit: Optional[int] = Field(
         default=60, description="Maximum execution time in seconds for all parallel paths", ge=10, le=300
+    )
+
+    # Parallel execution optimization
+    cpu_cores: Optional[int] = Field(
+        default=None,
+        description="Number of CPU cores to use (auto-detected if not specified), max recommended is system cores",
+    )
+    execution_strategy: str = Field(
+        default="adaptive",
+        description="Execution strategy: 'asyncio' (I/O focus), 'threads' (CPU focus), 'adaptive' (smart hybrid)",
+    )
+    enable_cpu_affinity: bool = Field(
+        default=True, description="Enable CPU affinity optimization for better performance"
+    )
+    batch_size: Optional[int] = Field(
+        default=None, description="Batch size for processing (auto-calculated if not specified)"
     )
 
     # Synthesis options
@@ -140,6 +164,59 @@ class ParallelThinkTool(BaseTool):
     def get_request_model(self):
         """Return the request model for parallel thinking"""
         return ParallelThinkRequest
+
+    def _get_optimal_cpu_cores(self, requested_cores: Optional[int] = None) -> int:
+        """Detect optimal number of CPU cores to use"""
+        available_cores = os.cpu_count() or 4  # Fallback to 4 if detection fails
+        
+        if requested_cores:
+            # Respect user preference but cap at available cores
+            return min(requested_cores, available_cores)
+        
+        # Smart auto-detection based on system resources
+        if available_cores <= 2:
+            return available_cores
+        elif available_cores <= 4:
+            return available_cores - 1  # Leave one core for system
+        elif available_cores <= 8:
+            return min(6, available_cores - 1)  # Use most cores but leave some headroom
+        else:
+            return min(8, available_cores - 2)  # Cap at 8 for diminishing returns
+
+    def _get_optimal_batch_size(self, total_paths: int, cores: int) -> int:
+        """Calculate optimal batch size for processing"""
+        if total_paths <= cores:
+            return 1  # Each path gets its own processing slot
+        
+        # Aim for 2-3 batches per core for good utilization
+        target_batches = cores * 2
+        batch_size = max(1, total_paths // target_batches)
+        return min(batch_size, 3)  # Cap batch size for memory efficiency
+
+    def _set_cpu_affinity(self, core_id: int) -> bool:
+        """Set CPU affinity for current thread (Linux/Unix only)"""
+        try:
+            # Try to set CPU affinity if supported
+            if hasattr(os, 'sched_setaffinity'):
+                os.sched_setaffinity(0, {core_id})
+                return True
+        except (AttributeError, OSError) as e:
+            logger.debug(f"Could not set CPU affinity to core {core_id}: {e}")
+        return False
+
+    def _get_memory_usage(self) -> float:
+        """Get current memory usage in MB (basic implementation)"""
+        try:
+            import psutil
+            process = psutil.Process()
+            return process.memory_info().rss / 1024 / 1024  # Convert to MB
+        except ImportError:
+            # Fallback: use basic resource monitoring
+            try:
+                import resource
+                return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024  # Convert to MB
+            except:
+                return 0.0
 
     async def prepare_prompt(self, request: ParallelThinkRequest) -> str:
         """Prepare the prompt for parallel thinking - not used in execute()"""
@@ -208,9 +285,11 @@ class ParallelThinkTool(BaseTool):
         self, path: ParallelThinkingPath, prompt: str, system_prompt: str, files_content: str
     ) -> ParallelThinkingPath:
         """Execute a single thinking path asynchronously"""
-        import time
-
         start_time = time.time()
+        start_memory = self._get_memory_usage()
+        
+        # Record thread information for debugging
+        path.thread_id = threading.get_ident()
 
         try:
             # Prepare the full prompt for this path
@@ -249,13 +328,103 @@ class ParallelThinkTool(BaseTool):
 
             path.result = response.content
             path.execution_time = time.time() - start_time
+            path.memory_usage = max(0, self._get_memory_usage() - start_memory)
 
         except Exception as e:
             path.error = str(e)
             path.execution_time = time.time() - start_time
+            path.memory_usage = max(0, self._get_memory_usage() - start_memory)
             logger.error(f"Error in thinking path {path.path_id}: {e}")
 
         return path
+
+    def _execute_thinking_path_sync(
+        self, path: ParallelThinkingPath, prompt: str, system_prompt: str, files_content: str, core_id: Optional[int] = None
+    ) -> ParallelThinkingPath:
+        """Execute a single thinking path synchronously (for thread pool execution)"""
+        if core_id is not None:
+            path.cpu_core = core_id
+            # Try to set CPU affinity if enabled
+            self._set_cpu_affinity(core_id)
+        
+        # Use asyncio.run to execute the async version in a thread
+        loop = None
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            pass
+        
+        if loop and loop.is_running():
+            # We're in an async context, need to create a new event loop for this thread
+            async def run_in_thread():
+                return await self._execute_thinking_path(path, prompt, system_prompt, files_content)
+            
+            # Create a new event loop for this thread
+            new_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(new_loop)
+            try:
+                result = new_loop.run_until_complete(run_in_thread())
+                return result
+            finally:
+                new_loop.close()
+        else:
+            # Not in an async context, can use asyncio.run
+            return asyncio.run(self._execute_thinking_path(path, prompt, system_prompt, files_content))
+
+    async def _execute_paths_hybrid(
+        self, paths: list[ParallelThinkingPath], prompt: str, system_prompt: str, files_content: str, 
+        cores: int, batch_size: int, enable_cpu_affinity: bool
+    ) -> list[ParallelThinkingPath]:
+        """Execute thinking paths using hybrid concurrency strategy"""
+        logger.info(f"Executing {len(paths)} thinking paths using {cores} cores with batch size {batch_size}")
+        
+        # Create thread pool for CPU-bound operations
+        with concurrent.futures.ThreadPoolExecutor(max_workers=cores, thread_name_prefix="ThinkingPath") as executor:
+            # Submit all paths to thread pool
+            future_to_path = {}
+            
+            for i, path in enumerate(paths):
+                # Assign core if CPU affinity is enabled
+                core_id = i % cores if enable_cpu_affinity else None
+                future = executor.submit(
+                    self._execute_thinking_path_sync, 
+                    path, prompt, system_prompt, files_content, core_id
+                )
+                future_to_path[future] = path
+            
+            # Collect results as they complete
+            completed_paths = []
+            for future in concurrent.futures.as_completed(future_to_path):
+                try:
+                    result_path = future.result()
+                    completed_paths.append(result_path)
+                except Exception as e:
+                    path = future_to_path[future]
+                    path.error = str(e)
+                    path.execution_time = 0
+                    completed_paths.append(path)
+                    logger.error(f"Thread execution failed for path {path.path_id}: {e}")
+        
+        return completed_paths
+
+    async def _execute_paths_asyncio(
+        self, paths: list[ParallelThinkingPath], prompt: str, system_prompt: str, files_content: str
+    ) -> list[ParallelThinkingPath]:
+        """Execute thinking paths using pure asyncio (original approach)"""
+        tasks = [self._execute_thinking_path(path, prompt, system_prompt, files_content) for path in paths]
+        return await asyncio.gather(*tasks, return_exceptions=True)
+
+    def _choose_execution_strategy(self, strategy: str, num_paths: int, cores: int) -> str:
+        """Choose optimal execution strategy based on context"""
+        if strategy == "adaptive":
+            # Smart strategy selection based on context
+            if num_paths <= 2:
+                return "asyncio"  # Simple async for small workloads
+            elif cores >= 4 and num_paths >= cores:
+                return "threads"  # Use threads for CPU-bound parallel work
+            else:
+                return "hybrid"  # Hybrid approach for balanced workloads
+        return strategy
 
     def _synthesize_results(
         self, paths: list[ParallelThinkingPath], synthesis_style: str, request: ParallelThinkRequest
@@ -294,16 +463,34 @@ class ParallelThinkTool(BaseTool):
 
         else:  # comprehensive
             synthesis = "## Comprehensive Parallel Thinking Analysis\n\n"
-            synthesis += (
-                f"Executed {len(paths)} parallel thinking paths in {max(p.execution_time for p in paths):.1f}s\n"
-            )
-            synthesis += f"Successful paths: {len(successful_paths)}/{len(paths)}\n\n"
+            
+            # Performance metrics
+            total_time = max(p.execution_time for p in paths) if paths else 0
+            total_memory = sum(getattr(p, 'memory_usage', 0) for p in successful_paths)
+            avg_time = sum(p.execution_time for p in successful_paths) / len(successful_paths) if successful_paths else 0
+            
+            synthesis += f"**Execution Summary:**\n"
+            synthesis += f"- Total paths: {len(paths)} | Successful: {len(successful_paths)}\n"
+            synthesis += f"- Total execution time: {total_time:.1f}s | Average per path: {avg_time:.1f}s\n"
+            synthesis += f"- Memory usage: {total_memory:.1f}MB\n"
+            
+            # CPU core utilization summary
+            cores_used = set(getattr(p, 'cpu_core', None) for p in paths if getattr(p, 'cpu_core', None) is not None)
+            if cores_used:
+                synthesis += f"- CPU cores utilized: {len(cores_used)} ({sorted(cores_used)})\n"
+            
+            synthesis += "\n"
 
             for i, path in enumerate(successful_paths, 1):
                 synthesis += f"### Path {i}: {path.approach}\n"
                 if path.model:
                     synthesis += f"**Model:** {path.model}\n"
-                synthesis += f"**Execution time:** {path.execution_time:.1f}s\n\n"
+                synthesis += f"**Execution time:** {path.execution_time:.1f}s"
+                if hasattr(path, 'cpu_core') and path.cpu_core is not None:
+                    synthesis += f" | **CPU Core:** {path.cpu_core}"
+                if hasattr(path, 'memory_usage') and path.memory_usage > 0:
+                    synthesis += f" | **Memory:** {path.memory_usage:.1f}MB"
+                synthesis += "\n\n"
                 synthesis += f"{path.result}\n\n---\n\n"
 
         return synthesis
@@ -355,47 +542,78 @@ class ParallelThinkTool(BaseTool):
                         path = ParallelThinkingPath(path_id=f"path_{i+1}", approach=approach)
                         paths.append(path)
 
+            # Smart CPU core and execution strategy selection
+            optimal_cores = self._get_optimal_cpu_cores(request.cpu_cores)
+            batch_size = request.batch_size or self._get_optimal_batch_size(len(paths), optimal_cores)
+            execution_strategy = self._choose_execution_strategy(request.execution_strategy, len(paths), optimal_cores)
+            
+            logger.info(f"Parallel execution: {len(paths)} paths, {optimal_cores} cores, strategy: {execution_strategy}")
+
             # Execute all thinking paths concurrently
             system_prompt = self.get_system_prompt()
+            start_time = time.time()
 
-            # Create tasks for concurrent execution
-            tasks = [self._execute_thinking_path(path, request.prompt, system_prompt, files_content) for path in paths]
-
-            # Execute with timeout
             try:
-                completed_paths = await asyncio.wait_for(
-                    asyncio.gather(*tasks, return_exceptions=True), timeout=request.time_limit or 60
-                )
+                if execution_strategy == "threads":
+                    # Use thread pool for CPU-bound parallel execution
+                    completed_paths = await self._execute_paths_hybrid(
+                        paths, request.prompt, system_prompt, files_content, 
+                        optimal_cores, batch_size, request.enable_cpu_affinity
+                    )
+                elif execution_strategy == "hybrid":
+                    # Use hybrid approach
+                    completed_paths = await self._execute_paths_hybrid(
+                        paths, request.prompt, system_prompt, files_content, 
+                        optimal_cores, batch_size, request.enable_cpu_affinity
+                    )
+                else:  # asyncio
+                    # Use pure asyncio (original approach)
+                    completed_paths = await asyncio.wait_for(
+                        self._execute_paths_asyncio(paths, request.prompt, system_prompt, files_content),
+                        timeout=request.time_limit or 60
+                    )
             except asyncio.TimeoutError:
                 logger.warning(f"Parallel thinking timed out after {request.time_limit}s")
-                # Cancel remaining tasks
-                for task in tasks:
-                    if not task.done():
-                        task.cancel()
                 # Use partial results
                 completed_paths = [p for p in paths if p.result or p.error]
+            except Exception as e:
+                logger.error(f"Error in parallel execution: {e}")
+                # Use any partial results available
+                completed_paths = [p for p in paths if p.result or p.error]
+                
+            total_execution_time = time.time() - start_time
 
             # Synthesize results
             synthesis = self._synthesize_results(completed_paths, request.synthesis_style, request)
 
-            # Prepare response
+            # Prepare response with enhanced metrics
+            successful_count = len([
+                p for p in completed_paths 
+                if hasattr(p, "result") and p.result and not getattr(p, "error", None)
+            ])
+            
             response = {
                 "parallel_thinking_analysis": synthesis,
                 "execution_summary": {
                     "total_paths": len(paths),
-                    "successful_paths": len(
-                        [
-                            p
-                            for p in completed_paths
-                            if hasattr(p, "result") and p.result and not getattr(p, "error", None)
-                        ]
-                    ),
+                    "successful_paths": successful_count,
                     "approaches_used": [p.approach for p in paths],
                     "models_used": list({p.model for p in paths if p.model}) or ["default"],
-                    "total_execution_time": (
-                        max([getattr(p, "execution_time", 0) for p in completed_paths]) if completed_paths else 0
+                    "total_execution_time": total_execution_time,
+                    "average_path_time": (
+                        sum([getattr(p, "execution_time", 0) for p in completed_paths]) / len(completed_paths)
+                        if completed_paths else 0
                     ),
                     "synthesis_style": request.synthesis_style,
+                    # Enhanced performance metrics
+                    "cpu_cores_used": optimal_cores,
+                    "execution_strategy": execution_strategy,
+                    "batch_size": batch_size,
+                    "total_memory_usage": sum([getattr(p, "memory_usage", 0) for p in completed_paths]),
+                    "cores_utilized": sorted(set(
+                        getattr(p, "cpu_core", None) for p in completed_paths 
+                        if getattr(p, "cpu_core", None) is not None
+                    )),
                 },
             }
 
@@ -409,6 +627,10 @@ class ParallelThinkTool(BaseTool):
                             "approach": path.approach,
                             "execution_time": getattr(path, "execution_time", 0),
                             "success": bool(path.result and not getattr(path, "error", None)),
+                            # Enhanced path metrics
+                            "cpu_core": getattr(path, "cpu_core", None),
+                            "thread_id": getattr(path, "thread_id", None),
+                            "memory_usage": getattr(path, "memory_usage", 0),
                         }
                         if path.model:
                             path_result["model"] = path.model
