@@ -257,17 +257,17 @@ class TestParallelThinkTool(unittest.TestCase):
     def test_cpu_core_detection(self):
         """Test CPU core detection and optimization"""
         tool = ParallelThinkTool()
-        
+
         # Test auto-detection
         cores = tool._get_optimal_cpu_cores()
         self.assertIsInstance(cores, int)
         self.assertGreater(cores, 0)
         self.assertLessEqual(cores, os.cpu_count() or 4)
-        
+
         # Test with explicit values
         cores_2 = tool._get_optimal_cpu_cores(2)
         self.assertEqual(cores_2, 2)
-        
+
         # Test capping at available cores
         cores_high = tool._get_optimal_cpu_cores(100)
         self.assertLessEqual(cores_high, os.cpu_count() or 4)
@@ -275,15 +275,15 @@ class TestParallelThinkTool(unittest.TestCase):
     def test_batch_size_calculation(self):
         """Test batch size optimization"""
         tool = ParallelThinkTool()
-        
+
         # Test various combinations
         batch_2_2 = tool._get_optimal_batch_size(2, 2)
         self.assertEqual(batch_2_2, 1)
-        
+
         batch_8_4 = tool._get_optimal_batch_size(8, 4)
         self.assertGreaterEqual(batch_8_4, 1)
         self.assertLessEqual(batch_8_4, 3)
-        
+
         batch_12_4 = tool._get_optimal_batch_size(12, 4)
         self.assertGreaterEqual(batch_12_4, 1)
         self.assertLessEqual(batch_12_4, 3)
@@ -291,23 +291,23 @@ class TestParallelThinkTool(unittest.TestCase):
     def test_execution_strategy_selection(self):
         """Test execution strategy selection logic"""
         tool = ParallelThinkTool()
-        
+
         # Test specific strategies pass through
         self.assertEqual(tool._choose_execution_strategy("asyncio", 4, 4), "asyncio")
         self.assertEqual(tool._choose_execution_strategy("threads", 4, 4), "threads")
         self.assertEqual(tool._choose_execution_strategy("hybrid", 4, 4), "hybrid")
-        
+
         # Test adaptive strategy logic
         strategy_small = tool._choose_execution_strategy("adaptive", 2, 4)
         self.assertEqual(strategy_small, "asyncio")
-        
+
         strategy_large = tool._choose_execution_strategy("adaptive", 8, 4)
         self.assertIn(strategy_large, ["threads", "hybrid"])
 
     def test_memory_monitoring(self):
         """Test memory usage monitoring"""
         tool = ParallelThinkTool()
-        
+
         memory = tool._get_memory_usage()
         self.assertIsInstance(memory, float)
         self.assertGreaterEqual(memory, 0)
@@ -315,7 +315,7 @@ class TestParallelThinkTool(unittest.TestCase):
     def test_cpu_affinity(self):
         """Test CPU affinity setting"""
         tool = ParallelThinkTool()
-        
+
         # Test affinity setting (may not work on all systems)
         result = tool._set_cpu_affinity(0)
         self.assertIsInstance(result, bool)
@@ -323,17 +323,17 @@ class TestParallelThinkTool(unittest.TestCase):
     def test_enhanced_thinking_path(self):
         """Test enhanced thinking path functionality"""
         path = ParallelThinkingPath("test_1", "Enhanced approach")
-        
+
         # Test initial state
         self.assertIsNone(path.cpu_core)
         self.assertIsNone(path.thread_id)
         self.assertEqual(path.memory_usage, 0.0)
-        
+
         # Test setting enhanced attributes
         path.cpu_core = 2
         path.thread_id = threading.get_ident()
         path.memory_usage = 15.5
-        
+
         self.assertEqual(path.cpu_core, 2)
         self.assertIsNotNone(path.thread_id)
         self.assertEqual(path.memory_usage, 15.5)
@@ -348,7 +348,7 @@ class TestParallelThinkTool(unittest.TestCase):
             enable_cpu_affinity=True,
             batch_size=2
         )
-        
+
         self.assertEqual(request.cpu_cores, 2)
         self.assertEqual(request.execution_strategy, "hybrid")
         self.assertTrue(request.enable_cpu_affinity)
@@ -357,7 +357,7 @@ class TestParallelThinkTool(unittest.TestCase):
     def test_enhanced_default_values(self):
         """Test enhanced default values in request model"""
         request = ParallelThinkRequest(prompt="Test prompt")
-        
+
         # Original defaults
         self.assertEqual(request.thinking_paths, 3)
         self.assertTrue(request.approach_diversity)
@@ -366,7 +366,7 @@ class TestParallelThinkTool(unittest.TestCase):
         self.assertEqual(request.time_limit, 60)
         self.assertEqual(request.synthesis_style, "comprehensive")
         self.assertTrue(request.include_individual_paths)
-        
+
         # Enhanced defaults
         self.assertIsNone(request.cpu_cores)
         self.assertEqual(request.execution_strategy, "adaptive")
