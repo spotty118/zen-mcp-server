@@ -1,5 +1,5 @@
 """Pytest configuration for the Zen MCP Server project.
-
+main
 This repository's test-suite makes extensive use of ``async def`` tests via
 ``@pytest.mark.asyncio``.  Normally ``pytest-asyncio`` provides the event loop
 integration required for those tests, but the execution environment used for
