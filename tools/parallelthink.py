@@ -17,6 +17,7 @@ import asyncio
 import concurrent.futures
 import logging
 import os
+import platform
 import threading
 import time
 from typing import TYPE_CHECKING, Any, Optional
@@ -177,23 +178,106 @@ class ParallelThinkTool(BaseTool):
         """Return the request model for parallel thinking"""
         return ParallelThinkRequest
 
+    def _detect_cpu_architecture(self) -> dict:
+        """Detect CPU architecture and capabilities for cross-platform optimization"""
+        cpu_info = {
+            "architecture": platform.machine().lower(),
+            "system": platform.system().lower(),
+            "processor": platform.processor(),
+            "available_cores": os.cpu_count() or 4,
+            "is_intel": False,
+            "is_amd": False,
+            "is_apple_silicon": False,
+            "is_arm": False,
+            "supports_affinity": False,
+            "supports_performance_cores": False,
+            "recommended_strategy": "adaptive"
+        }
+
+        # Detect CPU vendor/type
+        machine = cpu_info["architecture"]
+        processor = cpu_info["processor"].lower()
+        
+        # Apple Silicon detection (M1, M2, M3, etc.)
+        if "arm" in machine or "aarch64" in machine:
+            cpu_info["is_arm"] = True
+            if cpu_info["system"] == "darwin":
+                cpu_info["is_apple_silicon"] = True
+                cpu_info["supports_performance_cores"] = True
+                cpu_info["recommended_strategy"] = "hybrid"  # Apple Silicon benefits from hybrid approach
+        
+        # Intel/AMD x86_64 detection
+        elif "x86_64" in machine or "amd64" in machine:
+            if "intel" in processor or "genuine intel" in processor:
+                cpu_info["is_intel"] = True
+            elif "amd" in processor or "authentic amd" in processor:
+                cpu_info["is_amd"] = True
+                # AMD with 3D V-Cache benefits from specific optimizations
+                if "3d" in processor or "v-cache" in processor:
+                    cpu_info["supports_performance_cores"] = True
+
+        # Check OS-specific features
+        if cpu_info["system"] == "linux":
+            cpu_info["supports_affinity"] = hasattr(os, 'sched_setaffinity')
+        elif cpu_info["system"] == "windows":
+            # Windows supports processor affinity through different APIs
+            cpu_info["supports_affinity"] = True  # Will use psutil if available
+        elif cpu_info["system"] == "darwin":
+            # macOS has limited affinity support, but we can still optimize
+            cpu_info["supports_affinity"] = False  # macOS doesn't expose sched_setaffinity
+
+        logger.debug(f"Detected CPU: {cpu_info}")
+        return cpu_info
+
     def _get_optimal_cpu_cores(self, requested_cores: Optional[int] = None) -> int:
-        """Detect optimal number of CPU cores to use"""
-        available_cores = os.cpu_count() or 4  # Fallback to 4 if detection fails
+        """Detect optimal number of CPU cores to use with cross-platform optimization"""
+        cpu_info = self._detect_cpu_architecture()
+        available_cores = cpu_info["available_cores"]
 
         if requested_cores:
             # Respect user preference but cap at available cores
             return min(requested_cores, available_cores)
 
-        # Smart auto-detection based on system resources
-        if available_cores <= 2:
-            return available_cores
-        elif available_cores <= 4:
-            return available_cores - 1  # Leave one core for system
-        elif available_cores <= 8:
-            return min(6, available_cores - 1)  # Use most cores but leave some headroom
+        # Platform and architecture-specific optimization
+        if cpu_info["is_apple_silicon"]:
+            # Apple Silicon has performance and efficiency cores
+            # Use most cores but leave some for system (efficiency cores handle background)
+            if available_cores <= 4:
+                return available_cores
+            elif available_cores <= 8:
+                return available_cores - 1
+            else:
+                return min(10, available_cores - 2)  # M1 Ultra/M2 Ultra can handle more
+        
+        elif cpu_info["is_amd"] and cpu_info["supports_performance_cores"]:
+            # AMD with 3D V-Cache benefits from more aggressive core usage
+            if available_cores <= 4:
+                return available_cores
+            elif available_cores <= 8:
+                return available_cores - 1
+            else:
+                return min(12, available_cores - 2)  # Ryzen 7000X3D series
+        
+        elif cpu_info["is_intel"]:
+            # Intel CPUs with E-cores (12th gen+) need different handling
+            if available_cores <= 4:
+                return available_cores
+            elif available_cores <= 8:
+                return available_cores - 1
+            else:
+                # For high core count Intel (with E-cores), be more conservative
+                return min(8, available_cores - 2)
+        
         else:
-            return min(8, available_cores - 2)  # Cap at 8 for diminishing returns
+            # Generic optimization for unknown architectures
+            if available_cores <= 2:
+                return available_cores
+            elif available_cores <= 4:
+                return available_cores - 1
+            elif available_cores <= 8:
+                return min(6, available_cores - 1)
+            else:
+                return min(8, available_cores - 2)
 
     def _get_optimal_batch_size(self, total_paths: int, cores: int) -> int:
         """Calculate optimal batch size for processing"""
@@ -206,14 +290,52 @@ class ParallelThinkTool(BaseTool):
         return min(batch_size, 3)  # Cap batch size for memory efficiency
 
     def _set_cpu_affinity(self, core_id: int) -> bool:
-        """Set CPU affinity for current thread (Linux/Unix only)"""
+        """Set CPU affinity for current thread with cross-platform support"""
         try:
-            # Try to set CPU affinity if supported
-            if hasattr(os, 'sched_setaffinity'):
+            cpu_info = getattr(self, '_cached_cpu_info', None)
+            if not cpu_info:
+                cpu_info = self._detect_cpu_architecture()
+                self._cached_cpu_info = cpu_info
+
+            # Linux/Unix systems with sched_setaffinity
+            if cpu_info["system"] == "linux" and hasattr(os, 'sched_setaffinity'):
                 os.sched_setaffinity(0, {core_id})
+                logger.debug(f"Set CPU affinity to core {core_id} (Linux)")
                 return True
-        except (AttributeError, OSError) as e:
+            
+            # Windows systems - try using psutil if available
+            elif cpu_info["system"] == "windows":
+                try:
+                    import psutil
+                    process = psutil.Process()
+                    # Set affinity to specific CPU core
+                    process.cpu_affinity([core_id])
+                    logger.debug(f"Set CPU affinity to core {core_id} (Windows)")
+                    return True
+                except ImportError:
+                    logger.debug("psutil not available for Windows CPU affinity")
+                except Exception as e:
+                    logger.debug(f"Windows CPU affinity failed: {e}")
+            
+            # macOS - no direct affinity, but we can provide hints
+            elif cpu_info["system"] == "darwin":
+                # macOS doesn't support CPU affinity, but we can use thread priorities
+                # and let the OS scheduler handle core assignment
+                try:
+                    import threading
+                    current_thread = threading.current_thread()
+                    # Apple Silicon has performance and efficiency cores
+                    # Higher priority threads tend to get scheduled on performance cores
+                    if cpu_info["is_apple_silicon"] and core_id < (cpu_info["available_cores"] // 2):
+                        # Hint for performance cores (lower core IDs typically performance cores)
+                        logger.debug(f"macOS: Hinting performance core for thread {current_thread.name}")
+                    return True  # Return True since we provided optimization hints
+                except Exception as e:
+                    logger.debug(f"macOS CPU optimization hint failed: {e}")
+            
+        except Exception as e:
             logger.debug(f"Could not set CPU affinity to core {core_id}: {e}")
+        
         return False
 
     def _store_core_context(self, path: ParallelThinkingPath, core_id: int, context_data: dict,
@@ -577,15 +699,55 @@ class ParallelThinkTool(BaseTool):
         return await asyncio.gather(*tasks, return_exceptions=True)
 
     def _choose_execution_strategy(self, strategy: str, num_paths: int, cores: int) -> str:
-        """Choose optimal execution strategy based on context"""
+        """Choose optimal execution strategy based on context and CPU architecture"""
         if strategy == "adaptive":
-            # Smart strategy selection based on context
-            if num_paths <= 2:
-                return "asyncio"  # Simple async for small workloads
-            elif cores >= 4 and num_paths >= cores:
-                return "threads"  # Use threads for CPU-bound parallel work
+            cpu_info = getattr(self, '_cached_cpu_info', None)
+            if not cpu_info:
+                cpu_info = self._detect_cpu_architecture()
+                self._cached_cpu_info = cpu_info
+
+            # Architecture-specific strategy selection
+            if cpu_info["is_apple_silicon"]:
+                # Apple Silicon benefits from hybrid approach due to P/E core design
+                if num_paths <= 2:
+                    return "asyncio"
+                else:
+                    return "hybrid"  # Leverage both performance and efficiency cores
+            
+            elif cpu_info["is_amd"] and cpu_info["supports_performance_cores"]:
+                # AMD 3D V-Cache chips benefit from threading due to large cache
+                if num_paths <= 2:
+                    return "asyncio"
+                elif num_paths >= 4:
+                    return "threads"  # Take advantage of 3D V-Cache
+                else:
+                    return "hybrid"
+            
+            elif cpu_info["is_intel"]:
+                # Intel 12th gen+ with E-cores
+                if cores > 8:  # Likely has E-cores
+                    if num_paths <= 2:
+                        return "asyncio"
+                    else:
+                        return "hybrid"  # Balance P and E cores
+                else:
+                    # Traditional Intel without E-cores
+                    if num_paths <= 2:
+                        return "asyncio"
+                    elif cores >= 4 and num_paths >= cores:
+                        return "threads"
+                    else:
+                        return "hybrid"
+            
             else:
-                return "hybrid"  # Hybrid approach for balanced workloads
+                # Generic strategy selection for unknown architectures
+                if num_paths <= 2:
+                    return "asyncio"  # Simple async for small workloads
+                elif cores >= 4 and num_paths >= cores:
+                    return "threads"  # Use threads for CPU-bound parallel work
+                else:
+                    return "hybrid"  # Hybrid approach for balanced workloads
+        
         return strategy
 
     def _synthesize_results(

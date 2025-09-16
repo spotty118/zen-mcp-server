@@ -15,6 +15,7 @@ Key Features:
 
 import logging
 import os
+import platform
 import threading
 import time
 from dataclasses import dataclass, field
@@ -70,13 +71,28 @@ class CoreContextStorage:
         logger.info(f"Core context storage initialized for {max_cores} cores")
 
     def _get_current_core_id(self) -> Optional[int]:
-        """Attempt to get current CPU core ID"""
+        """Attempt to get current CPU core ID with cross-platform support"""
         try:
-            # Try to get CPU affinity if available
+            # Linux/Unix: Try to get CPU affinity if available
             if hasattr(os, 'sched_getaffinity'):
                 affinity = os.sched_getaffinity(0)
                 if len(affinity) == 1:
                     return next(iter(affinity))
+            
+            # Windows: Try to get CPU affinity via psutil
+            try:
+                import psutil
+                import platform
+                if platform.system().lower() == "windows":
+                    process = psutil.Process()
+                    affinity = process.cpu_affinity()
+                    if len(affinity) == 1:
+                        return affinity[0]
+            except ImportError:
+                pass
+            except Exception:
+                pass
+                
         except (AttributeError, OSError):
             pass
 
