@@ -1,42 +1,42 @@
-# Zen MCP: Many Workflows. One Context.
+# Nexus MCP: Multi-Agent AI Communication Hub
 
 [zen_web.webm](https://github.com/user-attachments/assets/851e3911-7f06-47c0-a4ab-a2601236697c)
 
 <div align="center">
-  <b>🤖 <a href="https://www.anthropic.com/claude-code">Claude Code</a> OR <a href="https://github.com/google-gemini/gemini-cli">Gemini CLI</a> OR <a href="https://github.com/openai/codex">Codex CLI</a> + [Gemini / OpenAI / Grok / OpenRouter / DIAL / Ollama / Anthropic / Any Model] = Your Ultimate AI Development Team</b>
+  <b>🤖 <a href="https://www.anthropic.com/claude-code">Claude Code</a> OR <a href="https://github.com/google-gemini/gemini-cli">Gemini CLI</a> OR <a href="https://github.com/openai/codex">Codex CLI</a> + [Gemini / OpenAI / Grok / OpenRouter / DIAL / Ollama / Anthropic / Any Model] = Your Ultimate AI Agent Team</b>
 </div>
 
 <br/>
 
-**AI orchestration for Claude Code** - A Model Context Protocol server that gives your CLI of choice (e.g. [Claude Code](https://www.anthropic.com/claude-code)) access to multiple AI models for enhanced code analysis, problem-solving, and collaborative development. Zen
+**Multi-agent AI orchestration for Claude Code** - A Model Context Protocol server where CPU cores act as autonomous AI agents that communicate, collaborate, and coordinate to solve complex problems. Each agent has its own personality, expertise area, and thought processes while working together as a unified team. Nexus
 works with Claude Code, Gemini CLI, Codex CLI as well as others.
 
-**True AI collaboration with conversation continuity** - Claude stays in control but gets perspectives from the best AI for each subtask. Context carries forward seamlessly across tools and models, enabling complex workflows like: code reviews with multiple models → automated planning → implementation → pre-commit validation.
+**True AI agent collaboration with inter-agent communication** - Claude coordinates a team of specialized AI agents that maintain individual context and thoughts while sharing insights and discoveries. Each CPU core becomes an autonomous agent with specific roles like Security Analyst, Performance Optimizer, or Architecture Reviewer, enabling dynamic team formation and sophisticated multi-agent workflows.
 
-> **You're in control.** Claude orchestrates the AI team, but you decide the workflow. Craft powerful prompts that bring in Gemini Pro, GPT 5, Flash, or local offline models exactly when needed.
+> **You're in control.** Claude orchestrates the agent team, but you decide the agent composition and workflows. Craft powerful prompts that leverage specialized agents (Security Analysts, Performance Optimizers, Debuggers) exactly when needed for complex multi-agent problem solving.
 
 <details>
-<summary><b>Reasons to Use Zen MCP</b></summary>
+<summary><b>Reasons to Use Nexus MCP</b></summary>
 
-1. **Multi-Model Orchestration** - Claude coordinates with Gemini Pro, O3, GPT-5, and 50+ other models to get the best analysis for each task
+1. **Multi-Agent Orchestration** - CPU cores act as specialized AI agents (Security Analyst, Performance Optimizer, Architecture Reviewer) that communicate and collaborate on complex tasks
 
-2. **Context Revival Magic** - Even after Claude's context resets, continue conversations seamlessly by having other models "remind" Claude of the discussion
+2. **Agent-to-Agent Communication** - Agents maintain individual thoughts and context while sharing insights, discoveries, and coordinating their analysis in real-time
 
-3. **Guided Workflows** - Enforces systematic investigation phases that prevent rushed analysis and ensure thorough code examination
+3. **Dynamic Team Formation** - Agents automatically form teams based on task requirements, with role-specific expertise and communication patterns
 
-4. **Extended Context Windows** - Break Claude's limits by delegating to Gemini (1M tokens) or O3 (200K tokens) for massive codebases
+4. **Persistent Agent Memory** - Each agent maintains its own context, personality, and decision-making history across interactions
 
-5. **True Conversation Continuity** - Full context flows across tools and models - Gemini remembers what O3 said 10 steps ago
+5. **Intelligent Agent Coordination** - Agents can discover each other, share workload, and provide cross-domain insights (security agent informing performance agent about timing attacks)
 
-6. **Model-Specific Strengths** - Extended thinking with Gemini Pro, blazing speed with Flash, strong reasoning with O3, privacy with local Ollama
+6. **Model-Specific Strengths with Agent Personalities** - Combine model capabilities with agent roles: Security-focused agents use analytical models, Creative agents use models optimized for brainstorming
 
-7. **Professional Code Reviews** - Multi-pass analysis with severity levels, actionable feedback, and consensus from multiple AI experts
+7. **Professional Multi-Agent Code Reviews** - Security, performance, and architecture agents work together, each contributing their specialized perspective
 
-8. **Smart Debugging Assistant** - Systematic root cause analysis with hypothesis tracking and confidence levels
+8. **Collaborative Debugging** - Debug specialists work with domain experts to provide systematic root cause analysis with multi-agent hypothesis testing
 
-9. **Automatic Model Selection** - Claude intelligently picks the right model for each subtask (or you can specify)
+9. **Agent Status Monitoring** - Track what each agent is thinking, their confidence levels, and how they're communicating with other team members
 
-10. **Vision Capabilities** - Analyze screenshots, diagrams, and visual content with vision-enabled models
+10. **Cross-Agent Learning** - Agents learn from each other's successful strategies and adapt their approaches based on team collaboration patterns
 
 11. **Local Model Support** - Run Llama, Mistral, or other models locally for complete privacy and zero API costs
 
@@ -61,19 +61,20 @@ works with Claude Code, Gemini CLI, Codex CLI as well as others.
 All within a single conversation thread! Gemini Pro in step 11 _knows_ what was recommended by O3 in step 7! Taking that context
 and review into consideration to aid with its final pre-commit review.
 
-**Think of it as Claude Code _for_ Claude Code.** This MCP isn't magic. It's just **super-glue**.
+**Think of it as Claude Code commanding an agent team.** This MCP isn't magic. It's **intelligent coordination**.
 
-> **Remember:** Claude stays in full control — but **YOU** call the shots.
-> Zen is designed to have Claude engage other models only when needed — and to follow through with meaningful back-and-forth.
-> **You're** the one who crafts the powerful prompt that makes Claude bring in Gemini, Flash, O3 — or fly solo.
-> You're the guide. The prompter. The puppeteer.
+> **Remember:** Claude stays in full control — but **YOU** define the agent team composition.
+> Nexus is designed to have Claude deploy specialized agents only when needed — and to orchestrate meaningful agent collaboration.
+> **You're** the one who crafts the powerful prompt that makes Claude deploy Security Analysts, Performance Optimizers, Architecture Reviewers — or work with a single generalist agent.
+> You're the orchestrator. The prompter. The team commander.
 > #### You are the AI - **Actually Intelligent**.
 
 #### Recommended AI Stack
 
 For best results, use Claude Code with:
-- **Opus 4.1** - All agentic work and orchestration
-- **Gemini 2.5 Pro** - Deep thinking, code reviews, debugging, pre-commit analysis
+- **Opus 4.1** - All agentic orchestration and team coordination
+- **Gemini 2.5 Pro** - Deep thinking agents, architecture review, debugging specialists
+- **Specialized Agent Roles** - Security analysts, performance optimizers, code quality inspectors
 
 </details>
 
@@ -285,38 +286,39 @@ DISABLED_TOOLS=
 
 👉 **[Advanced Usage Guide](docs/advanced-usage.md)** for complex workflows, model configuration, and power-user features
 
-## CPU Utilization & Architecture
+## CPU Utilization & Agent Architecture
 
-### Intelligent Multi-Core Processing
+### Intelligent Multi-Agent Processing
 
-Zen MCP uses a **shared-instance architecture with per-core context isolation** - the optimal balance between performance and context awareness:
+Nexus MCP uses a **shared-instance architecture with per-agent context isolation** - CPU cores become autonomous agents with specialized roles:
 
-**Why Shared Instance vs. Separate Core Instances?**
+**Why Agent-Based Architecture?**
 
-✅ **Shared Instance (Current Approach)**
-- **Full context awareness** - Cores share insights and discoveries
-- **Memory efficient** - Single process, shared resources
-- **Better coordination** - Unified synthesis of results
-- **Cross-core learning** - Successful strategies shared between cores
+✅ **Agent-Based Multi-Core (Current Approach)**
+- **Specialized expertise** - Each agent has specific domain knowledge (security, performance, etc.)
+- **Inter-agent communication** - Agents share insights and coordinate analysis
+- **Memory efficient** - Single process with agent context isolation
+- **Dynamic teams** - Agents form collaborative teams for complex tasks
+- **Individual thoughts** - Each agent maintains its own reasoning and decision history
 
-❌ **Separate Instances Per Core**
-- **Context isolation** - Each core works in complete isolation
-- **Memory overhead** - Multiple processes, duplicated resources  
-- **No collaboration** - Cores cannot learn from each other
-- **Complex coordination** - Difficult to synthesize results
+❌ **Simple Parallel Processing**
+- **No specialization** - All cores perform identical generic analysis
+- **No communication** - Cores cannot coordinate or share insights
+- **No memory** - No persistent agent context or learning
+- **No collaboration** - Missed cross-domain insights and synergies
 
-### Smart CPU Optimization
+### Smart CPU Optimization with Agent Deployment
 
-**Architecture-Aware Processing:**
-- **Apple Silicon (M1/M2/M3+)**: Leverages Performance/Efficiency core design
-- **AMD Ryzen X3D**: Optimizes for 3D V-Cache capabilities
-- **Intel 12th gen+**: Balances Performance and Efficiency cores
-- **Cross-platform**: Graceful fallback on all systems
+**Architecture-Aware Agent Deployment:**
+- **Apple Silicon (M1/M2/M3+)**: Performance cores run analytical agents, efficiency cores handle communication
+- **AMD Ryzen X3D**: Leverages 3D V-Cache for agent context storage
+- **Intel 12th gen+**: Balances performance agents on P-cores, support agents on E-cores
+- **Cross-platform**: Graceful fallback with round-robin agent assignment
 
-**Execution Strategies:**
-- **`adaptive`** (default): System chooses optimal strategy automatically
-- **`threads`**: CPU-intensive parallel processing
-- **`asyncio`**: I/O-bound operations
+**Agent Execution Strategies:**
+- **`adaptive`** (default): System assigns agents to optimal cores automatically
+- **`threads`**: CPU-intensive agents for deep analysis tasks
+- **`asyncio`**: Communication-focused agents for coordination
 - **`hybrid`**: Intelligent combination of both
 
 **Context Sharing Benefits:**

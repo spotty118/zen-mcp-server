@@ -1,4 +1,4 @@
-# Zen MCP Server - Docker Setup
+# Nexus MCP Server - Docker Setup
 
 ## Quick Start
 
@@ -330,21 +330,22 @@ python -m json.tool .vscode/mcp.json
 
 ## Available Tools
 
-The Zen MCP Server provides these tools when properly configured:
+The Nexus MCP Server provides these agent-enhanced tools when properly configured:
 
-- **chat** - General AI conversation and collaboration
-- **thinkdeep** - Multi-stage investigation and reasoning  
-- **planner** - Interactive sequential planning
-- **consensus** - Multi-model consensus workflow
-- **codereview** - Comprehensive code review
-- **debug** - Root cause analysis and debugging
-- **analyze** - Code analysis and assessment
-- **refactor** - Refactoring analysis and suggestions
-- **secaudit** - Security audit workflow
-- **testgen** - Test generation with edge cases
-- **docgen** - Documentation generation
+- **chat** - General AI conversation with agent collaboration
+- **thinkdeep** - Multi-stage investigation using specialized agents  
+- **planner** - Interactive planning with agent coordination
+- **parallelthink** - Multi-agent parallel reasoning and collaboration
+- **consensus** - Multi-agent consensus building workflow
+- **codereview** - Comprehensive code review by agent teams
+- **debug** - Root cause analysis with debug specialists
+- **analyze** - Code analysis by specialized agent roles
+- **refactor** - Refactoring analysis with quality inspectors
+- **secaudit** - Security audit by security analyst agents
+- **testgen** - Test generation with development specialists
+- **docgen** - Documentation generation with writing agents
 - **tracer** - Code tracing and dependency mapping
-- **precommit** - Pre-commit validation workflow
+- **precommit** - Pre-commit validation by quality agents
 - **listmodels** - Available AI models information
 - **version** - Server version and configuration
 
