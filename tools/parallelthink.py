@@ -672,55 +672,85 @@ class ParallelThinkTool(BaseTool):
                 full_prompt = f"{full_prompt}\n\nFILE CONTEXT:\n{files_content}"
 
             # Use agent's own API client if available, otherwise fall back to centralized approach
+            agent_api_failed = False
             if agent_api_client:
                 # Agent makes its own API call
                 logger.debug(f"Agent {path.assigned_agent} making direct API call")
-                
-                api_call = await agent_api_client.make_api_call(
-                    prompt=full_prompt,
-                    model_name=path.model,
-                    parameters={
-                        "system_prompt": system_prompt,
-                        "temperature": self.get_default_temperature(),
-                        "thinking_mode": self.get_default_thinking_mode()
-                    }
-                )
-                
-                if api_call.status == "completed" and api_call.response:
-                    path.result = api_call.response
-                    logger.info(f"Agent {path.assigned_agent} completed API call successfully")
-                else:
-                    raise Exception(f"Agent API call failed: {api_call.error}")
+                try:
+                    api_call = await agent_api_client.make_api_call(
+                        prompt=full_prompt,
+                        model_name=path.model,
+                        parameters={
+                            "system_prompt": system_prompt,
+                            "temperature": self.get_default_temperature(),
+                            "thinking_mode": self.get_default_thinking_mode()
+                        }
+                    )
                     
-            else:
+                    if api_call.status == "completed" and api_call.response:
+                        path.result = api_call.response
+                        logger.info(f"Agent {path.assigned_agent} completed API call successfully")
+                    else:
+                        # Check if this is a provider availability issue
+                        if api_call.error and "No available providers" in api_call.error:
+                            logger.warning(f"Agent {path.assigned_agent} has no available providers, falling back to centralized approach")
+                            agent_api_failed = True
+                        else:
+                            raise Exception(f"Agent API call failed: {api_call.error}")
+                except Exception as e:
+                    logger.warning(f"Agent API call failed: {e}, falling back to centralized approach")
+                    agent_api_failed = True
+                    
+            if not agent_api_client or agent_api_failed:
                 # Fallback to centralized approach
                 logger.debug(f"Using centralized API call for path {path.path_id}")
                 
                 # Get provider and model
                 registry = ModelProviderRegistry()
-                if path.model:
-                    # Try to use specified model
-                    try:
-                        provider = registry.get_provider_for_model(path.model)
-                        model_name = path.model
-                    except Exception as e:
-                        logger.warning(f"Could not use model {path.model}: {e}, falling back to default")
-                        provider = registry.get_default_provider()
-                        model_name = provider.get_default_model()
+                available_providers = registry.get_available_providers()
+                
+                if not available_providers:
+                    # No providers available at all - this is expected when running outside server context
+                    logger.warning(f"No providers available for centralized approach in path {path.path_id}. "
+                                  "This occurs when using tools outside the server context without configured providers.")
+                    path.result = "Error: No AI providers available. Please configure API keys and restart the server."
+                    path.error = "No providers configured"
                 else:
-                    provider = registry.get_default_provider()
-                    model_name = provider.get_default_model()
-
-                # Execute the thinking
-                response = provider.generate_content(
-                    prompt=full_prompt,
-                    model_name=model_name,
-                    system_prompt=system_prompt,
-                    temperature=self.get_default_temperature(),
-                    thinking_mode=self.get_default_thinking_mode(),
-                )
-
-                path.result = response.content
+                    # Try to get a provider and model
+                    provider = None
+                    model_name = None
+                    
+                    if path.model:
+                        # Try to use specified model
+                        try:
+                            provider = registry.get_provider_for_model(path.model)
+                            model_name = path.model
+                        except Exception as e:
+                            logger.warning(f"Could not use model {path.model}: {e}, trying first available provider")
+                            
+                    if not provider and available_providers:
+                        # Get first available provider
+                        provider_type = available_providers[0]
+                        provider = registry.get_provider(provider_type)
+                        if provider:
+                            available_models = registry.get_available_model_names(provider_type)
+                            model_name = available_models[0] if available_models else "default"
+                    
+                    if provider and model_name:
+                        # Execute the thinking
+                        response = provider.generate_content(
+                            prompt=full_prompt,
+                            model_name=model_name,
+                            system_prompt=system_prompt,
+                            temperature=self.get_default_temperature(),
+                            thinking_mode=self.get_default_thinking_mode(),
+                        )
+                        path.result = response.content
+                    else:
+                        # Even the centralized approach failed
+                        logger.error(f"No providers or models available for centralized approach in path {path.path_id}")
+                        path.result = "Error: No AI providers or models available for processing."
+                        path.error = "No providers or models available"
 
             path.execution_time = time.time() - start_time
             path.memory_usage = max(0, self._get_memory_usage() - start_memory)
