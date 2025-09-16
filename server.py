@@ -133,7 +133,7 @@ try:
     file_handler = RotatingFileHandler(
         log_dir / "mcp_server.log",
         maxBytes=20 * 1024 * 1024,  # 20MB max file size
-        backupCount=5,  # Keep 10 rotated files (100MB total)
+        backupCount=5,  # Keep 5 rotated files (100MB total across backups)
         encoding="utf-8",
     )
     file_handler.setLevel(getattr(logging, log_level, logging.INFO))
@@ -144,8 +144,8 @@ try:
     mcp_logger = logging.getLogger("mcp_activity")
     mcp_file_handler = RotatingFileHandler(
         log_dir / "mcp_activity.log",
-        maxBytes=10 * 1024 * 1024,  # 20MB max file size
-        backupCount=2,  # Keep 5 rotated files (20MB total)
+        maxBytes=10 * 1024 * 1024,  # 10MB max file size
+        backupCount=2,  # Keep 2 rotated files (20MB total across backups)
         encoding="utf-8",
     )
     mcp_file_handler.setLevel(logging.INFO)

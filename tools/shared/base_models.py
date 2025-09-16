@@ -37,7 +37,7 @@ COMMON_FIELD_DESCRIPTIONS = {
     ),
     "continuation_id": (
         "Unique thread continuation ID for multi-turn conversations. Reuse last continuation_id "
-        "when continuing discussion (unless user provides different ID) using exact unique identifer. "
+        "when continuing discussion (unless user provides different ID) using exact unique identifier. "
         "Embeds complete conversation history. Build upon history without repeating. "
         "Focus on new insights. Works across different tools."
     ),
