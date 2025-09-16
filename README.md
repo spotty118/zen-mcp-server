@@ -61,19 +61,20 @@ works with Claude Code, Gemini CLI, Codex CLI as well as others.
 All within a single conversation thread! Gemini Pro in step 11 _knows_ what was recommended by O3 in step 7! Taking that context
 and review into consideration to aid with its final pre-commit review.
 
-**Think of it as Claude Code _for_ Claude Code.** This MCP isn't magic. It's just **super-glue**.
+**Think of it as Claude Code commanding an agent team.** This MCP isn't magic. It's **intelligent coordination**.
 
-> **Remember:** Claude stays in full control — but **YOU** call the shots.
-> Zen is designed to have Claude engage other models only when needed — and to follow through with meaningful back-and-forth.
-> **You're** the one who crafts the powerful prompt that makes Claude bring in Gemini, Flash, O3 — or fly solo.
-> You're the guide. The prompter. The puppeteer.
+> **Remember:** Claude stays in full control — but **YOU** define the agent team composition.
+> Nexus is designed to have Claude deploy specialized agents only when needed — and to orchestrate meaningful agent collaboration.
+> **You're** the one who crafts the powerful prompt that makes Claude deploy Security Analysts, Performance Optimizers, Architecture Reviewers — or work with a single generalist agent.
+> You're the orchestrator. The prompter. The team commander.
 > #### You are the AI - **Actually Intelligent**.
 
 #### Recommended AI Stack
 
 For best results, use Claude Code with:
-- **Opus 4.1** - All agentic work and orchestration
-- **Gemini 2.5 Pro** - Deep thinking, code reviews, debugging, pre-commit analysis
+- **Opus 4.1** - All agentic orchestration and team coordination
+- **Gemini 2.5 Pro** - Deep thinking agents, architecture review, debugging specialists
+- **Specialized Agent Roles** - Security analysts, performance optimizers, code quality inspectors
 
 </details>
 
@@ -285,38 +286,39 @@ DISABLED_TOOLS=
 
 👉 **[Advanced Usage Guide](docs/advanced-usage.md)** for complex workflows, model configuration, and power-user features
 
-## CPU Utilization & Architecture
+## CPU Utilization & Agent Architecture
 
-### Intelligent Multi-Core Processing
+### Intelligent Multi-Agent Processing
 
-Zen MCP uses a **shared-instance architecture with per-core context isolation** - the optimal balance between performance and context awareness:
+Nexus MCP uses a **shared-instance architecture with per-agent context isolation** - CPU cores become autonomous agents with specialized roles:
 
-**Why Shared Instance vs. Separate Core Instances?**
+**Why Agent-Based Architecture?**
 
-✅ **Shared Instance (Current Approach)**
-- **Full context awareness** - Cores share insights and discoveries
-- **Memory efficient** - Single process, shared resources
-- **Better coordination** - Unified synthesis of results
-- **Cross-core learning** - Successful strategies shared between cores
+✅ **Agent-Based Multi-Core (Current Approach)**
+- **Specialized expertise** - Each agent has specific domain knowledge (security, performance, etc.)
+- **Inter-agent communication** - Agents share insights and coordinate analysis
+- **Memory efficient** - Single process with agent context isolation
+- **Dynamic teams** - Agents form collaborative teams for complex tasks
+- **Individual thoughts** - Each agent maintains its own reasoning and decision history
 
-❌ **Separate Instances Per Core**
-- **Context isolation** - Each core works in complete isolation
-- **Memory overhead** - Multiple processes, duplicated resources  
-- **No collaboration** - Cores cannot learn from each other
-- **Complex coordination** - Difficult to synthesize results
+❌ **Simple Parallel Processing**
+- **No specialization** - All cores perform identical generic analysis
+- **No communication** - Cores cannot coordinate or share insights
+- **No memory** - No persistent agent context or learning
+- **No collaboration** - Missed cross-domain insights and synergies
 
-### Smart CPU Optimization
+### Smart CPU Optimization with Agent Deployment
 
-**Architecture-Aware Processing:**
-- **Apple Silicon (M1/M2/M3+)**: Leverages Performance/Efficiency core design
-- **AMD Ryzen X3D**: Optimizes for 3D V-Cache capabilities
-- **Intel 12th gen+**: Balances Performance and Efficiency cores
-- **Cross-platform**: Graceful fallback on all systems
+**Architecture-Aware Agent Deployment:**
+- **Apple Silicon (M1/M2/M3+)**: Performance cores run analytical agents, efficiency cores handle communication
+- **AMD Ryzen X3D**: Leverages 3D V-Cache for agent context storage
+- **Intel 12th gen+**: Balances performance agents on P-cores, support agents on E-cores
+- **Cross-platform**: Graceful fallback with round-robin agent assignment
 
-**Execution Strategies:**
-- **`adaptive`** (default): System chooses optimal strategy automatically
-- **`threads`**: CPU-intensive parallel processing
-- **`asyncio`**: I/O-bound operations
+**Agent Execution Strategies:**
+- **`adaptive`** (default): System assigns agents to optimal cores automatically
+- **`threads`**: CPU-intensive agents for deep analysis tasks
+- **`asyncio`**: Communication-focused agents for coordination
 - **`hybrid`**: Intelligent combination of both
 
 **Context Sharing Benefits:**
