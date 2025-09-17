@@ -167,6 +167,13 @@ test_simulation_files/.claude/
 # Temporary test directories
 test-setup/
 
+# Test files and directories
+tests/
+test_*.py
+*_test.py
+simulator_tests/
+conftest.py
+
 # Scratch feature documentation files
 FEATURE_*.md
 # Temporary files
