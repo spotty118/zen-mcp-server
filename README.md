@@ -40,11 +40,11 @@ works with Claude Code, Gemini CLI, Codex CLI as well as others.
 
 11. **Vision Capabilities** - Analyze screenshots, diagrams, and visual content with vision-enabled models
 
-12. **Optimized Performance** - Reduced token usage by 60-80% at launch without sacrificing effectiveness
+12. **Local Model Support** - Run Llama, Mistral, or other models locally for complete privacy and zero API costs
 
-11. **Local Model Support** - Run Llama, Mistral, or other models locally for complete privacy and zero API costs
+13. **Bypass MCP Token Limits** - Automatically works around MCP's 25K limit for large prompts and responses
 
-12. **Bypass MCP Token Limits** - Automatically works around MCP's 25K limit for large prompts and responses
+14. **Optimized Performance** - Reduced token usage by 60-80% at launch without sacrificing effectiveness
 
 **The Killer Feature:** When Claude's context resets, just ask to "continue with O3" - the other model's response magically revives Claude's understanding without re-ingesting documents!
 
