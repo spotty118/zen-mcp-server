@@ -1,0 +1,38 @@
+# Zen Intelligence API - Additional Requirements
+# These extend the base requirements.txt for the REST API functionality
+
+# FastAPI and web server components
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6
+
+# Additional async and HTTP utilities
+httpx>=0.25.0
+aiofiles>=23.2.1
+
+# Enhanced data validation and serialization  
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+
+# Authentication and security
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+python-multipart>=0.0.6
+
+# Monitoring and logging
+structlog>=23.2.0
+prometheus-client>=0.19.0
+
+# Caching and performance
+redis>=5.0.1
+aiocache>=0.12.2
+
+# Development and testing
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+httpx>=0.25.0  # For testing API endpoints
+
+# Optional: Database support for persistence
+# sqlalchemy>=2.0.0
+# alembic>=1.13.0
+# asyncpg>=0.29.0  # For PostgreSQL
