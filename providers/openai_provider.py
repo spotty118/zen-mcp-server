@@ -20,6 +20,8 @@ logger = logging.getLogger(__name__)
 class OpenAIModelProvider(OpenAICompatibleProvider):
     """Official OpenAI API provider (api.openai.com)."""
 
+    FRIENDLY_NAME = "OpenAI"
+
     # Model configurations using ModelCapabilities objects
     SUPPORTED_MODELS = {
         "gpt-5": ModelCapabilities(
