@@ -262,6 +262,10 @@ DISABLED_TOOLS=
 - **Web search integration** - Access current documentation and best practices
 - **[Large prompt support](docs/advanced-usage.md#working-with-large-prompts)** - Bypass MCP's 25K token limit
 
+**🧪 Experimental Features**
+- **[Intelligence API](README_INTELLIGENCE_API.md)** - OpenAI-compatible REST API with enterprise orchestration
+- **Multi-strategy processing** - Single, parallel, sequential, and consensus-based model coordination
+
 ## Example Workflows
 
 **Multi-model Code Review with Expert Validation:**
@@ -283,6 +287,46 @@ DISABLED_TOOLS=
 → Structured planning → Multiple expert opinions → Consensus building → Implementation roadmap
 
 👉 **[Advanced Usage Guide](docs/advanced-usage.md)** for complex workflows, model configuration, and power-user features
+
+## 🧪 Experimental: Intelligence API (REST API)
+
+**⚠️ Experimental Feature** - The Zen Intelligence API is an advanced OpenAI-compatible REST API that extends the MCP server with enterprise-grade multi-model orchestration capabilities.
+
+**Key Features:**
+- **OpenAI-Compatible Endpoints** - Drop-in replacement for OpenAI API with advanced orchestration
+- **Smart Model Selection** - Automatically routes queries to optimal models based on task complexity and domain
+- **Multiple Orchestration Strategies** - Single, parallel, sequential, and consensus-based processing
+- **Performance Analytics** - Real-time model performance tracking and optimization
+- **Enterprise Security** - Bearer token authentication, logging, and monitoring
+
+**Quick Start:**
+```bash
+# Install API dependencies
+pip install -r requirements-intelligence-api.txt
+
+# Start the REST API server
+python start_intelligence_api.py
+
+# API available at: http://localhost:8000/docs
+```
+
+**Example Usage:**
+```bash
+# OpenAI-compatible endpoint with orchestration
+curl -X POST "http://localhost:8000/v1/chat/completions" \
+  -H "Authorization: Bearer your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "messages": [{"role": "user", "content": "Review this code"}],
+    "model": "zen-orchestrator",
+    "orchestration_preferences": {
+      "orchestration_strategy": "consensus",
+      "preferred_models": ["claude-sonnet", "gpt-4"]
+    }
+  }'
+```
+
+👉 **[Full Intelligence API Documentation](README_INTELLIGENCE_API.md)** for detailed setup, endpoints, and enterprise features
 
 ## Quick Links
 
