@@ -216,17 +216,17 @@ class TestOpenAIProvider:
 
         provider = OpenAIModelProvider("test-key")
 
-        # Test o3mini -> o3-mini
-        mock_response.model = "o3-mini"
-        provider.generate_content(prompt="Test", model_name="o3mini", temperature=1.0)
+        # Test gpt5mini -> gpt-5-mini (using GPT models that use chat completions)
+        mock_response.model = "gpt-5-mini"
+        provider.generate_content(prompt="Test", model_name="gpt5mini", temperature=1.0)
         call_kwargs = mock_client.chat.completions.create.call_args[1]
-        assert call_kwargs["model"] == "o3-mini"
+        assert call_kwargs["model"] == "gpt-5-mini"
 
-        # Test o4mini -> o4-mini
-        mock_response.model = "o4-mini"
-        provider.generate_content(prompt="Test", model_name="o4mini", temperature=1.0)
+        # Test nano -> gpt-5-nano
+        mock_response.model = "gpt-5-nano"
+        provider.generate_content(prompt="Test", model_name="nano", temperature=1.0)
         call_kwargs = mock_client.chat.completions.create.call_args[1]
-        assert call_kwargs["model"] == "o4-mini"
+        assert call_kwargs["model"] == "gpt-5-nano"
 
     @patch("providers.openai_compatible.OpenAI")
     def test_generate_content_no_alias_passthrough(self, mock_openai_class):
@@ -238,7 +238,7 @@ class TestOpenAIProvider:
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = "Test response"
         mock_response.choices[0].finish_reason = "stop"
-        mock_response.model = "o3-mini"
+        mock_response.model = "gpt-5"
         mock_response.usage = MagicMock()
         mock_response.usage.prompt_tokens = 10
         mock_response.usage.completion_tokens = 5
@@ -247,10 +247,10 @@ class TestOpenAIProvider:
 
         provider = OpenAIModelProvider("test-key")
 
-        # Test full model name passes through unchanged (use o3-mini since o3-pro has special handling)
-        provider.generate_content(prompt="Test", model_name="o3-mini", temperature=1.0)
+        # Test full model name passes through unchanged (use gpt-5 since reasoning models use responses endpoint)
+        provider.generate_content(prompt="Test", model_name="gpt-5", temperature=1.0)
         call_kwargs = mock_client.chat.completions.create.call_args[1]
-        assert call_kwargs["model"] == "o3-mini"  # Should be unchanged
+        assert call_kwargs["model"] == "gpt-5"  # Should be unchanged
 
     def test_supports_thinking_mode(self):
         """Test thinking mode support."""
@@ -269,6 +269,55 @@ class TestOpenAIProvider:
         assert (
             provider.supports_thinking_mode("mini") is True
         )  # "mini" now resolves to gpt-5-mini which supports thinking
+
+    @patch("providers.openai_compatible.OpenAI")
+    def test_reasoning_models_use_responses_endpoint(self, mock_openai_class):
+        """Test that all OpenAI reasoning models route to the /v1/responses endpoint."""
+        # Set up mock for OpenAI client responses endpoint
+        mock_client = MagicMock()
+        mock_openai_class.return_value = mock_client
+
+        mock_response = MagicMock()
+        mock_response.output_text = "Test response"
+        mock_response.model = "o3"
+        mock_response.id = "test-id"
+        mock_response.created_at = 1234567890
+        mock_response.usage = MagicMock()
+        mock_response.usage.prompt_tokens = 10
+        mock_response.usage.completion_tokens = 5
+        mock_response.usage.total_tokens = 15
+
+        mock_client.responses.create.return_value = mock_response
+
+        provider = OpenAIModelProvider("test-key")
+
+        # Test all reasoning models
+        reasoning_models = ["o3", "o3-mini", "o3-pro", "o4-mini"]
+        
+        for model_name in reasoning_models:
+            mock_client.reset_mock()
+            mock_response.model = model_name
+            
+            # Generate content with reasoning model
+            result = provider.generate_content(
+                prompt=f"Test with {model_name}", 
+                model_name=model_name, 
+                temperature=1.0
+            )
+
+            # Verify responses.create was called (not chat.completions.create)
+            mock_client.responses.create.assert_called_once()
+            mock_client.chat.completions.create.assert_not_called()
+            
+            call_args = mock_client.responses.create.call_args[1]
+            assert call_args["model"] == model_name
+            assert call_args["input"][0]["role"] == "user"
+            assert f"Test with {model_name}" in call_args["input"][0]["content"][0]["text"]
+
+            # Verify the response
+            assert result.content == "Test response"
+            assert result.model_name == model_name
+            assert result.metadata["endpoint"] == "responses"
 
     @patch("providers.openai_compatible.OpenAI")
     def test_o3_pro_routes_to_responses_endpoint(self, mock_openai_class):
@@ -308,8 +357,8 @@ class TestOpenAIProvider:
         assert result.metadata["endpoint"] == "responses"
 
     @patch("providers.openai_compatible.OpenAI")
-    def test_non_o3_pro_uses_chat_completions(self, mock_openai_class):
-        """Test that non-o3-pro models use the standard chat completions endpoint."""
+    def test_gpt_models_use_chat_completions(self, mock_openai_class):
+        """Test that GPT models use the standard chat completions endpoint."""
         # Set up mock
         mock_client = MagicMock()
         mock_openai_class.return_value = mock_client
@@ -317,7 +366,7 @@ class TestOpenAIProvider:
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = "Test response"
         mock_response.choices[0].finish_reason = "stop"
-        mock_response.model = "o3-mini"
+        mock_response.model = "gpt-5"
         mock_response.id = "test-id"
         mock_response.created = 1234567890
         mock_response.usage = MagicMock()
@@ -328,12 +377,96 @@ class TestOpenAIProvider:
 
         provider = OpenAIModelProvider("test-key")
 
-        # Generate content with o3-mini (not o3-pro)
-        result = provider.generate_content(prompt="Test prompt", model_name="o3-mini", temperature=1.0)
+        # Test GPT models that should use chat completions
+        gpt_models = ["gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-4.1"]
+        
+        for model_name in gpt_models:
+            mock_client.reset_mock()
+            mock_response.model = model_name
+            
+            # Generate content with GPT model
+            result = provider.generate_content(
+                prompt=f"Test with {model_name}", 
+                model_name=model_name, 
+                temperature=1.0
+            )
 
-        # Verify chat.completions.create was called
-        mock_client.chat.completions.create.assert_called_once()
+            # Verify chat.completions.create was called (not responses.create)
+            mock_client.chat.completions.create.assert_called_once()
+            mock_client.responses.create.assert_not_called()
 
-        # Verify the response
-        assert result.content == "Test response"
-        assert result.model_name == "o3-mini"
+            # Verify the response
+            assert result.content == "Test response"
+            assert result.model_name == model_name
+
+    @patch("providers.openai_compatible.OpenAI")
+    def test_verify_api_connection_success(self, mock_openai_class):
+        """Test successful API connection verification."""
+        # Set up mock
+        mock_client = MagicMock()
+        mock_openai_class.return_value = mock_client
+        
+        # Mock models list response
+        mock_model_1 = MagicMock()
+        mock_model_1.id = "gpt-5"
+        mock_model_2 = MagicMock()
+        mock_model_2.id = "o3-pro"
+        mock_model_3 = MagicMock()
+        mock_model_3.id = "gpt-4o"
+        
+        mock_models_response = MagicMock()
+        mock_models_response.data = [mock_model_1, mock_model_2, mock_model_3]
+        mock_client.models.list.return_value = mock_models_response
+        
+        provider = OpenAIModelProvider("test-key")
+        
+        # Test API verification
+        result = provider.verify_api_connection()
+        
+        # Verify models.list was called
+        mock_client.models.list.assert_called_once()
+        
+        # Verify successful response
+        assert result["status"] == "connected"
+        assert result["provider"] == "OpenAI"
+        assert result["available_models_count"] == 3
+        assert "gpt-5" in result["sample_models"]
+        assert "API connection verified successfully" in result["message"]
+
+    @patch("providers.openai_compatible.OpenAI")
+    def test_verify_api_connection_failure(self, mock_openai_class):
+        """Test API connection verification failure."""
+        # Set up mock to raise exception
+        mock_client = MagicMock()
+        mock_openai_class.return_value = mock_client
+        mock_client.models.list.side_effect = Exception("API key invalid")
+        
+        provider = OpenAIModelProvider("test-key")
+        
+        # Test API verification
+        result = provider.verify_api_connection()
+        
+        # Verify models.list was called
+        mock_client.models.list.assert_called_once()
+        
+        # Verify failure response
+        assert result["status"] == "failed"
+        assert result["provider"] == "OpenAI"
+        assert result["error"] == "API key invalid"
+        assert "Failed to verify API connection" in result["message"]
+
+    def test_should_use_responses_endpoint(self):
+        """Test the _should_use_responses_endpoint method."""
+        provider = OpenAIModelProvider("test-key")
+        
+        # Test reasoning models (should use responses endpoint)
+        assert provider._should_use_responses_endpoint("o3") is True
+        assert provider._should_use_responses_endpoint("o3-mini") is True
+        assert provider._should_use_responses_endpoint("o3-pro") is True
+        assert provider._should_use_responses_endpoint("o4-mini") is True
+        
+        # Test GPT models (should use chat completions)
+        assert provider._should_use_responses_endpoint("gpt-5") is False
+        assert provider._should_use_responses_endpoint("gpt-5-mini") is False
+        assert provider._should_use_responses_endpoint("gpt-5-nano") is False
+        assert provider._should_use_responses_endpoint("gpt-4.1") is False

@@ -302,8 +302,44 @@ class OpenAICompatibleProvider(ModelProvider):
 
         return sanitized
 
+    def verify_api_connection(self) -> dict:
+        """Verify that the OpenAI API connection is working.
+        
+        Returns:
+            dict: Status information about the API connection
+            
+        Raises:
+            Exception: If the API connection verification fails
+        """
+        try:
+            # Try to list models to verify API connectivity
+            # This is a lightweight operation that doesn't consume tokens
+            models_response = self.client.models.list()
+            
+            available_models = [model.id for model in models_response.data]
+            
+            return {
+                "status": "connected",
+                "provider": self.FRIENDLY_NAME,
+                "base_url": getattr(self.client, "_base_url", "default"),
+                "available_models_count": len(available_models),
+                "sample_models": available_models[:5],  # Show first 5 models as sample
+                "message": "API connection verified successfully"
+            }
+            
+        except Exception as e:
+            error_msg = f"Failed to verify API connection: {str(e)}"
+            logging.error(error_msg)
+            return {
+                "status": "failed",
+                "provider": self.FRIENDLY_NAME,
+                "base_url": getattr(self.client, "_base_url", "unknown"),
+                "error": str(e),
+                "message": error_msg
+            }
+
     def _safe_extract_output_text(self, response) -> str:
-        """Safely extract output_text from o3-pro response with validation.
+        """Safely extract output_text from OpenAI reasoning model response with validation.
 
         Args:
             response: Response object from OpenAI SDK
@@ -318,18 +354,44 @@ class OpenAICompatibleProvider(ModelProvider):
         logging.debug(f"Response attributes: {dir(response)}")
 
         if not hasattr(response, "output_text"):
-            raise ValueError(f"o3-pro response missing output_text field. Response type: {type(response).__name__}")
+            raise ValueError(f"OpenAI reasoning model response missing output_text field. Response type: {type(response).__name__}")
 
         content = response.output_text
         logging.debug(f"Extracted output_text: '{content}' (type: {type(content)})")
 
         if content is None:
-            raise ValueError("o3-pro returned None for output_text")
+            raise ValueError("OpenAI reasoning model returned None for output_text")
 
         if not isinstance(content, str):
-            raise ValueError(f"o3-pro output_text is not a string. Got type: {type(content).__name__}")
+            raise ValueError(f"OpenAI reasoning model output_text is not a string. Got type: {type(content).__name__}")
 
         return content
+
+    def _should_use_responses_endpoint(self, model_name: str) -> bool:
+        """Determine if a model should use the /v1/responses endpoint.
+        
+        OpenAI reasoning models (o3, o3-mini, o3-pro, o4-mini, etc.) use the responses
+        endpoint instead of the standard chat completions endpoint.
+        
+        Args:
+            model_name: The resolved model name
+            
+        Returns:
+            bool: True if the model should use the responses endpoint
+        """
+        # Check if this is an OpenAI reasoning model by looking at model capabilities
+        try:
+            capabilities = self.get_capabilities(model_name)
+            # Reasoning models typically don't support temperature and are from OpenAI
+            return (
+                capabilities.provider == ProviderType.OPENAI and
+                not capabilities.supports_temperature and
+                model_name.startswith(('o3', 'o4'))  # OpenAI reasoning model naming pattern
+            )
+        except Exception:
+            # If we can't get capabilities, fall back to explicit model name checks
+            reasoning_models = {'o3', 'o3-mini', 'o3-pro', 'o4-mini'}
+            return model_name in reasoning_models
 
     def _generate_with_responses_endpoint(
         self,
@@ -339,7 +401,7 @@ class OpenAICompatibleProvider(ModelProvider):
         max_output_tokens: Optional[int] = None,
         **kwargs,
     ) -> ModelResponse:
-        """Generate content using the /v1/responses endpoint for o3-pro via OpenAI library."""
+        """Generate content using the /v1/responses endpoint for OpenAI reasoning models via OpenAI library."""
         # Convert messages to the correct format for responses endpoint
         input_messages = []
 
@@ -348,7 +410,7 @@ class OpenAICompatibleProvider(ModelProvider):
             content = message.get("content", "")
 
             if role == "system":
-                # For o3-pro, system messages should be handled carefully to avoid policy violations
+                # For OpenAI reasoning models, system messages should be handled carefully to avoid policy violations
                 # Instead of prefixing with "System:", we'll include the system content naturally
                 input_messages.append({"role": "user", "content": [{"type": "input_text", "text": content}]})
             elif role == "user":
@@ -384,7 +446,7 @@ class OpenAICompatibleProvider(ModelProvider):
 
                 sanitized_params = self._sanitize_for_logging(completion_params)
                 logging.info(
-                    f"o3-pro API request (sanitized): {json.dumps(sanitized_params, indent=2, ensure_ascii=False)}"
+                    f"OpenAI reasoning model API request (sanitized): {json.dumps(sanitized_params, indent=2, ensure_ascii=False)}"
                 )
 
                 # Use OpenAI client's responses endpoint
@@ -431,14 +493,14 @@ class OpenAICompatibleProvider(ModelProvider):
                 if is_retryable and attempt < max_retries - 1:
                     delay = retry_delays[attempt]
                     logging.warning(
-                        f"Retryable error for o3-pro responses endpoint, attempt {actual_attempts}/{max_retries}: {str(e)}. Retrying in {delay}s..."
+                        f"Retryable error for OpenAI reasoning model responses endpoint, attempt {actual_attempts}/{max_retries}: {str(e)}. Retrying in {delay}s..."
                     )
                     time.sleep(delay)
                 else:
                     break
 
         # If we get here, all retries failed
-        error_msg = f"o3-pro responses endpoint error after {actual_attempts} attempt{'s' if actual_attempts > 1 else ''}: {str(last_exception)}"
+        error_msg = f"OpenAI reasoning model responses endpoint error after {actual_attempts} attempt{'s' if actual_attempts > 1 else ''}: {str(last_exception)}"
         logging.error(error_msg)
         raise RuntimeError(error_msg) from last_exception
 
@@ -539,9 +601,10 @@ class OpenAICompatibleProvider(ModelProvider):
                     continue  # Skip unsupported parameters for reasoning models
                 completion_params[key] = value
 
-        # Check if this is o3-pro and needs the responses endpoint
-        if resolved_model == "o3-pro":
-            # This model requires the /v1/responses endpoint
+        # Check if this is a reasoning model that needs the responses endpoint
+        # All OpenAI reasoning models (o3, o3-mini, o3-pro, o4-mini, etc.) use /v1/responses
+        if self._should_use_responses_endpoint(resolved_model):
+            # These models require the /v1/responses endpoint
             # If it fails, we should not fall back to chat/completions
             return self._generate_with_responses_endpoint(
                 model_name=resolved_model,
