@@ -30,13 +30,17 @@ works with Claude Code, Gemini CLI, Codex CLI as well as others.
 
 6. **Model-Specific Strengths** - Extended thinking with Gemini Pro, blazing speed with Flash, strong reasoning with O3, privacy with local Ollama
 
-7. **Professional Code Reviews** - Multi-pass analysis with severity levels, actionable feedback, and consensus from multiple AI experts
+7. **Professional Code Reviews** - Multi-pass analysis with severity levels, external expert validation, and consensus from multiple AI experts
 
 8. **Smart Debugging Assistant** - Systematic root cause analysis with hypothesis tracking and confidence levels
 
-9. **Automatic Model Selection** - Claude intelligently picks the right model for each subtask (or you can specify)
+9. **Enhanced Pre-Commit Validation** - Comprehensive change analysis with expert security and architectural review
 
-10. **Vision Capabilities** - Analyze screenshots, diagrams, and visual content with vision-enabled models
+10. **Automatic Model Selection** - Claude intelligently picks the right model for each subtask (or you can specify)
+
+11. **Vision Capabilities** - Analyze screenshots, diagrams, and visual content with vision-enabled models
+
+12. **Optimized Performance** - Reduced token usage by 60-80% at launch without sacrificing effectiveness
 
 11. **Local Model Support** - Run Llama, Mistral, or other models locally for complete privacy and zero API costs
 
@@ -143,8 +147,8 @@ cd zen-mcp-server
 
 **Code Analysis & Quality**
 - **[`debug`](docs/tools/debug.md)** - Systematic investigation and root cause analysis
-- **[`precommit`](docs/tools/precommit.md)** - Validate changes before committing, prevent regressions
-- **[`codereview`](docs/tools/codereview.md)** - Professional reviews with severity levels and actionable feedback
+- **[`precommit`](docs/tools/precommit.md)** - Comprehensive pre-commit validation with expert security and architectural review
+- **[`codereview`](docs/tools/codereview.md)** - Professional reviews with external expert validation and severity-based feedback
 - **[`analyze`](docs/tools/analyze.md)** *(disabled by default - [enable](#tool-configuration))* - Understand architecture, patterns, dependencies across entire codebases
 
 **Development Tools** *(Disabled by default - [enable](#tool-configuration))*
@@ -254,22 +258,23 @@ DISABLED_TOOLS=
 **Developer Experience**
 - **Guided workflows** - Systematic investigation prevents rushed analysis
 - **Smart file handling** - Auto-expand directories, manage token limits
+- **Token optimization** - 60-80% reduction in schema descriptions without sacrificing effectiveness
 - **Web search integration** - Access current documentation and best practices
 - **[Large prompt support](docs/advanced-usage.md#working-with-large-prompts)** - Bypass MCP's 25K token limit
 
 ## Example Workflows
 
-**Multi-model Code Review:**
+**Multi-model Code Review with Expert Validation:**
 ```
 "Perform a codereview using gemini pro and o3, then use planner to create a fix strategy"
 ```
-→ Claude reviews code systematically → Consults Gemini Pro → Gets O3's perspective → Creates unified action plan
+→ Claude reviews code systematically → External expert validation via Gemini Pro → Gets O3's perspective → Creates unified action plan
 
-**Collaborative Debugging:**
+**Comprehensive Pre-commit Validation:**
 ```
 "Debug this race condition with max thinking mode, then validate the fix with precommit"
 ```
-→ Deep investigation → Expert analysis → Solution implementation → Pre-commit validation
+→ Deep investigation → Expert analysis → Solution implementation → Expert security and architectural review
 
 **Architecture Planning:**
 ```
